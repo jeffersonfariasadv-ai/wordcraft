@@ -33,6 +33,24 @@ pub fn backup_path(path: &Path) -> PathBuf {
     path.with_file_name(name)
 }
 
+/// Copy `from` to `to`, which Windows keeps hidden (the folder shows it only with "Hidden items"
+/// on), so the backup doesn't clutter the user's folders. Elsewhere a plain copy.
+pub fn copy_hidden(from: &Path, to: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+        let mut src = std::fs::File::open(from)?;
+        let mut dst = std::fs::OpenOptions::new().write(true).create(true).truncate(true).attributes(FILE_ATTRIBUTE_HIDDEN).open(to)?;
+        std::io::copy(&mut src, &mut dst)?;
+        dst.sync_all()
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::copy(from, to).map(|_| ())
+    }
+}
+
 /// The name a new document gets in the default folder: `Documento 2026-11-07 14h05.docx`.
 pub fn new_document_name(now: chrono::NaiveDateTime) -> String {
     format!("Documento {}.docx", now.format("%Y-%m-%d %Hh%M"))
@@ -131,7 +149,7 @@ impl WordApp {
             let bak = backup_path(path);
             let bak_s = bak.to_string_lossy().into_owned();
             wordcraft_engine::file_access::check_write(&bak_s)?;
-            std::fs::copy(path, &bak).map_err(|e| {
+            copy_hidden(path, &bak).map_err(|e| {
                 log::warn!("couldn't back up {} to {bak_s}: {e}", path.display());
                 i18n::fmt(tl!("Não foi possível criar a cópia de segurança {bak}: {error}"), &[("bak", &bak_s), ("error", &e.to_string())])
             })?;
@@ -209,6 +227,25 @@ mod tests {
     fn backup_keeps_the_whole_name() {
         assert_eq!(backup_path(Path::new("/x/Petição.docx")), PathBuf::from("/x/Petição.docx.bak"));
         assert_eq!(backup_path(Path::new("notas.odt")), PathBuf::from("notas.odt.bak"));
+    }
+
+    /// Windows: the backup is a hidden file, and a second backup over it still works.
+    #[cfg(windows)]
+    #[test]
+    fn backups_are_hidden_on_windows() {
+        use std::os::windows::fs::MetadataExt;
+        let dir = std::env::temp_dir().join(format!("wc-fork-hidden-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("a.docx");
+        std::fs::write(&src, b"one").unwrap();
+        let bak = backup_path(&src);
+        copy_hidden(&src, &bak).unwrap();
+        assert_eq!(std::fs::metadata(&bak).unwrap().file_attributes() & 0x2, 0x2, "hidden");
+        std::fs::write(&src, b"two").unwrap();
+        copy_hidden(&src, &bak).unwrap();
+        assert_eq!(std::fs::read(&bak).unwrap(), b"two");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
