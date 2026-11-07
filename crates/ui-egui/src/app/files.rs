@@ -360,8 +360,9 @@ impl WordApp {
                 self.ui.backstage = false;
             }
         }
+        // Fork: AutoSave's file is set per document when it opens (`fork_after_open`), so the
+        // dropped file's own is kept here.
         if self.session.document_id() != before {
-            self.autosave_path = None;
             self.dialog = None;
             self.ui.backstage = false;
             self.canvas.want_focus = true;
@@ -419,8 +420,16 @@ impl WordApp {
     /// AutoSave: write a saved document a couple of seconds after the last change. A failure is
     /// shown in the status bar and turns AutoSave off for the file until the user saves it again.
     pub(crate) fn autosave_tick(&mut self, now: f64) {
+        // Fork: a new document is asked once where to save, so AutoSave can cover it.
+        self.fork_ask_where_to_save(now);
         if self.autosaves() && self.session.dirty && now - self.last_autosave > 2500.0 && now - self.canvas.caret_visible_since > 1500.0 {
             self.last_autosave = now;
+            // Fork: the opened file's original goes to `.bak` first; without it, no AutoSave.
+            if let Err(e) = self.fork_backup_before_autosave() {
+                log::warn!("AutoSave backup failed: {e}");
+                self.status(i18n::fmt(tl!("Salvamento automático desligado: {error}. Salve o documento para religá-lo."), &[("error", &e)]));
+                return;
+            }
             if let Err(e) = self.session.run("file.save", &json!({})) {
                 log::warn!("AutoSave failed: {e}");
                 self.autosave_path = None;

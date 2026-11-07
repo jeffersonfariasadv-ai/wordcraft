@@ -140,6 +140,7 @@ impl WordApp {
             ime_origin: false,
             read_aloud_error: None,
             autosave_path: None,
+            fork: Default::default(),
             saves_in_flight: Vec::new(),
             font_generation: wordcraft_fonts::FontDb::global().generation(),
             recovery_seen: false,

@@ -213,6 +213,8 @@ impl WordApp {
             print_document: _,
             // Per document: the shown document's, swapped with `parked` on a document switch.
             autosave_path: _,
+            // Fork: AutoSave backups and questions, kept by path and document id.
+            fork: _,
             comment_drafts: _,
             parked: _,
             // Per window.
