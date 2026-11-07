@@ -4587,12 +4587,18 @@ fn renaming_a_saved_file_keeps_autosave_and_replaces_its_recent_entry() {
     assert!(saved.plain_text(wordcraft_doc::StoryRef::Body).contains("More "));
     assert!(!path.exists());
 
-    // A file opened but not saved in this session doesn't gain AutoSave by being renamed.
+    // Fork: an opened file is AutoSaved too, and its backup follows a rename: the first AutoSave
+    // after it still copies the original (under its new name) to `.bak`.
     let mut b = app();
     b.run("file.open", json!({"path": renamed.to_string_lossy()})).unwrap();
-    assert!(!b.saved_here());
+    assert!(b.autosaves());
+    let before = std::fs::read(&renamed).unwrap();
     b.run("file.rename", json!({"name": "Notes v3"})).unwrap();
-    assert!(!b.saved_here() && !b.autosaves());
+    assert!(b.autosaves(), "AutoSave still covers the renamed file");
+    b.run("text.insert", json!({"text": "Again "})).unwrap();
+    b.autosave_tick(now_ms() + 10_000.0);
+    assert!(!b.session.dirty);
+    assert_eq!(std::fs::read(dir.join("Notes v3.docx.bak")).unwrap(), before);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -5170,28 +5176,157 @@ fn redo_after_a_mailing_cannot_put_the_result_under_a_saved_file() {
     }
 }
 
-/// Surfaces finding 3: AutoSave rewrote any opened .docx ~2.5 s after the first keystroke,
-/// deleting whatever the reader doesn't model (content controls, charts, macros…).
+/// Fork: an opened .docx is AutoSaved from its first edit, without a manual Save. Since saving
+/// drops whatever the reader doesn't model (content controls, charts, macros…, surfaces
+/// finding 3), the original is first copied beside it as `contract.docx.bak`, once per session.
 #[test]
-fn opened_files_are_not_autosaved_until_the_user_saves() {
+fn opened_files_are_autosaved_after_a_backup_of_the_original() {
     let dir = scratch("autosave");
+    let path = docx_on_disk(&dir, "Original");
+    let before = std::fs::read(&path).unwrap();
+    let bak = dir.join("contract.docx.bak");
+    let mut a = app();
+    a.run("file.open", json!({"path": path.to_string_lossy()})).unwrap();
+    assert!(a.autosaves(), "AutoSave covers the opened file at once");
+    a.run("text.insert", json!({"text": "Typed "})).unwrap();
+    a.autosave_tick(now_ms() + 10_000.0);
+    assert!(!a.session.dirty, "AutoSave wrote the file");
+    assert_eq!(std::fs::read(&bak).unwrap(), before, "the .bak is the original, byte for byte");
+    let saved = wordcraft_engine::io::open_path(&path).unwrap();
+    assert!(saved.plain_text(wordcraft_doc::StoryRef::Body).contains("Typed Original"));
+
+    // Later AutoSaves leave the backup alone.
+    a.run("text.insert", json!({"text": "More "})).unwrap();
+    a.autosave_tick(now_ms() + 20_000.0);
+    assert!(!a.session.dirty);
+    assert_eq!(std::fs::read(&bak).unwrap(), before, "the backup is made once per session");
+    let saved = wordcraft_engine::io::open_path(&path).unwrap();
+    assert!(saved.plain_text(wordcraft_doc::StoryRef::Body).contains("Typed More Original"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Fork: a manual Save over an opened file backs up the original first, too.
+#[test]
+fn saving_an_opened_file_backs_up_the_original_first() {
+    let dir = scratch("autosave-manual-bak");
     let path = docx_on_disk(&dir, "Original");
     let before = std::fs::read(&path).unwrap();
     let mut a = app();
     a.run("file.open", json!({"path": path.to_string_lossy()})).unwrap();
     a.run("text.insert", json!({"text": "Typed "})).unwrap();
+    a.run("file.save", json!({})).unwrap();
+    assert_eq!(std::fs::read(dir.join("contract.docx.bak")).unwrap(), before);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Fork: when the backup can't be written, the opened file is never AutoSaved over.
+#[test]
+fn no_autosave_over_an_opened_file_without_its_backup() {
+    let dir = scratch("autosave-bak-fails");
+    let path = docx_on_disk(&dir, "Original");
+    let before = std::fs::read(&path).unwrap();
+    // A folder where the backup would go: copying the file there fails.
+    std::fs::create_dir_all(dir.join("contract.docx.bak")).unwrap();
+    let mut a = app();
+    a.run("file.open", json!({"path": path.to_string_lossy()})).unwrap();
+    a.run("text.insert", json!({"text": "Typed "})).unwrap();
     a.autosave_tick(now_ms() + 10_000.0);
-    assert!(std::fs::read(&path).unwrap() == before, "an opened file is never rewritten behind the user's back");
+    assert_eq!(std::fs::read(&path).unwrap(), before, "the original is untouched");
+    assert!(a.session.dirty);
+    assert!(!a.autosaves(), "AutoSave is off for the file until it is saved");
+    a.autosave_tick(now_ms() + 20_000.0);
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Fork: a file WordCraft can't keep (here Markdown; an old .doc the same) is never AutoSaved,
+/// and opening it says so on the status bar.
+#[test]
+fn opening_a_file_autosave_cannot_keep_says_why() {
+    let dir = scratch("autosave-open-md");
+    let md = dir.join("notes.md");
+    std::fs::write(&md, "# Notes\n\nSome text\n").unwrap();
+    let mut a = app();
+    a.run("file.open", json!({"path": md.to_string_lossy()})).unwrap();
+    assert!(!a.autosaves());
+    let msg = a.status_msg.as_ref().map(|(m, _)| m.clone()).unwrap_or_default();
+    assert!(msg.contains("notes.md") && msg.contains(".docx"), "{msg}");
+    a.run("text.insert", json!({"text": "Typed "})).unwrap();
+    a.autosave_tick(now_ms() + 10_000.0);
+    assert!(a.session.dirty);
+    assert!(!dir.join("notes.md.bak").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Fork: a new document is asked where to save once, after its first edit; cancelling isn't
+/// asked again in the session.
+#[test]
+fn a_new_document_is_asked_where_to_save_once() {
+    let asked = std::rc::Rc::new(std::cell::Cell::new(0));
+    let mut a = app();
+    let count = asked.clone();
+    a.services.pick_save = Some(Box::new(move |_| {
+        count.set(count.get() + 1);
+        None
+    }));
+    a.autosave_tick(now_ms() + 10_000.0);
+    assert_eq!(asked.get(), 0, "an untouched document isn't asked");
+    a.run("text.insert", json!({"text": "Hello"})).unwrap();
+    a.autosave_tick(now_ms() + 20_000.0);
+    assert_eq!(asked.get(), 1, "the first edit asks");
+    a.run("text.insert", json!({"text": " again"})).unwrap();
+    a.autosave_tick(now_ms() + 30_000.0);
+    a.autosave_tick(now_ms() + 40_000.0);
+    assert_eq!(asked.get(), 1, "cancelled once, never asked again");
     assert!(a.session.dirty);
 
-    // After an explicit save, later changes are saved automatically.
-    a.run("file.save", json!({})).unwrap();
-    a.run("text.insert", json!({"text": "More "})).unwrap();
-    assert!(a.session.dirty);
+    // With AutoSave off, nothing asks.
+    a.run("file.new", json!({})).unwrap();
+    a.autosave = false;
+    a.run("text.insert", json!({"text": "Off"})).unwrap();
+    a.autosave_tick(now_ms() + 50_000.0);
+    assert_eq!(asked.get(), 1);
+}
+
+/// Fork: Save As picked at the question covers the new document with AutoSave.
+#[test]
+fn saving_at_the_question_turns_autosave_on() {
+    let dir = scratch("autosave-new-pick");
+    let path = dir.join("Nova petição.docx");
+    let picked = path.to_string_lossy().into_owned();
+    let mut a = app();
+    a.services.pick_save = Some(Box::new(move |_| Some(picked.clone())));
+    a.run("text.insert", json!({"text": "Hello"})).unwrap();
     a.autosave_tick(now_ms() + 10_000.0);
+    assert!(path.exists());
+    assert!(a.autosaves());
+    a.run("text.insert", json!({"text": " world"})).unwrap();
+    a.autosave_tick(now_ms() + 20_000.0);
     assert!(!a.session.dirty);
     let saved = wordcraft_engine::io::open_path(&path).unwrap();
-    assert!(saved.plain_text(wordcraft_doc::StoryRef::Body).contains("Typed More Original"));
+    assert!(saved.plain_text(wordcraft_doc::StoryRef::Body).contains("Hello world"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Fork: with a default folder set, a new document is saved there as `Documento … .docx`
+/// without asking, and AutoSave covers it.
+#[test]
+fn a_new_document_is_saved_in_the_default_folder() {
+    let dir = scratch("autosave-new-folder");
+    let mut a = app();
+    a.services.pick_save = Some(Box::new(|_| panic!("the default folder needs no question")));
+    a.run("file.options", json!({"newDocumentsFolder": dir.to_string_lossy()})).unwrap();
+    assert_eq!(a.session.prefs.new_documents_folder.as_deref(), Some(dir.to_string_lossy().as_ref()));
+    a.run("text.insert", json!({"text": "Hello"})).unwrap();
+    a.autosave_tick(now_ms() + 10_000.0);
+    let files: Vec<_> = std::fs::read_dir(&dir).unwrap().filter_map(Result::ok).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    assert_eq!(files.len(), 1, "{files:?}");
+    assert!(files[0].starts_with("Documento ") && files[0].ends_with(".docx"), "{files:?}");
+    assert!(a.autosaves());
+    assert!(!a.session.dirty);
+    assert!(a.run("file.options", json!({"newDocumentsFolder": 5})).is_err());
+    a.run("file.options", json!({"newDocumentsFolder": "auto"})).unwrap();
+    assert_eq!(a.session.prefs.new_documents_folder, None);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

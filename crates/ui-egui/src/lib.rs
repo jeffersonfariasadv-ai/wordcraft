@@ -25,6 +25,8 @@ macro_rules! tl {
 pub mod a11y;
 pub mod a11y_pane;
 pub mod async_saves;
+/// Fork: AutoSave without a manual Save, with a `.bak` of opened files.
+mod autosave_fork;
 pub mod autoscroll;
 pub mod backstage;
 pub mod canvas;
@@ -756,10 +758,13 @@ pub struct WordApp {
     /// Read Aloud: the start of the sentence the caret was last moved to, and the last error shown.
     pub(crate) read_aloud_at: Option<wordcraft_engine::doc::Pos>,
     pub(crate) read_aloud_error: Option<String>,
-    /// The file the document was last explicitly saved to in this session; AutoSave writes only
-    /// there. A file that was merely opened isn't rewritten until the user saves it: saving drops
-    /// whatever WordCraft can't represent (content controls, charts, macros…).
+    /// The file AutoSave writes this document to: one explicitly saved in this session, or (fork)
+    /// one opened in a format AutoSave keeps, whose original is first copied to `.bak`
+    /// ([`autosave_fork`]), since saving drops whatever WordCraft can't represent (content
+    /// controls, charts, macros…).
     autosave_path: Option<std::path::PathBuf>,
+    /// Fork: the session's AutoSave backups and Save As questions ([`autosave_fork`]).
+    fork: autosave_fork::ForkAutoSave,
     /// Web: saves the browser's picker hasn't finished yet ([`async_saves`], #1315).
     saves_in_flight: Vec<SaveInFlight>,
     /// Web: the command a Save Changes prompt held back until its picker save ends (#1315).

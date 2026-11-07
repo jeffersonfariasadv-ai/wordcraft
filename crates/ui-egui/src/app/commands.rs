@@ -205,6 +205,8 @@ impl WordApp {
         let math_session = self.session.math.as_ref().map(|m| m.session);
         let composing_before = !self.canvas.ime_preedit.is_empty();
         let old_path = self.session.path.clone();
+        // Fork: an opened file's original is copied to `.bak` before it is first written over.
+        self.fork_backup_before_save(id, &params);
         let r = if self.ime_origin {
             self.session.run_ime(id, &params).map_err(|e| e.to_string())
         } else {
@@ -256,6 +258,12 @@ impl WordApp {
         {
             self.autosave_path = self.session.path.clone();
         }
+        // Fork: an opened file is AutoSaved from its first edit, when its format allows.
+        if let Ok(v) = &r
+            && id == "file.open"
+        {
+            self.fork_after_open(v);
+        }
         // A renamed file is the same file: AutoSave keeps covering it, and Recent drops the old name.
         if r.is_ok()
             && id == "file.rename"
@@ -264,6 +272,8 @@ impl WordApp {
             if self.autosave_path.as_ref() == Some(&old) {
                 self.autosave_path = self.session.path.clone();
             }
+            // Fork: a pending `.bak` of the original follows the file to its new name.
+            self.fork_after_rename(&old);
             let old = old.to_string_lossy();
             self.ui.recent.retain(|r| *r != old);
         }

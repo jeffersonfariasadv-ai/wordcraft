@@ -492,6 +492,10 @@ fn save(app: &mut WordApp, ui: &mut Ui) {
         app.session.autosave = autosave;
     }
     note(ui, "AutoSave writes your changes to the file a moment after you stop typing.");
+    // Fork: where a new document is saved without asking (the web app has no folders).
+    if !cfg!(target_arch = "wasm32") {
+        new_documents_folder(app, ui);
+    }
     ui.add_space(8.0);
     // The open document's `file.privacyOptions` (#1062): saved with it, honoured when it is saved.
     section(ui, "Privacy for this document");
@@ -703,6 +707,38 @@ fn templates_folder(app: &mut WordApp, ui: &mut Ui) {
     });
     ui.data_mut(|d| d.insert_temp(id, folder));
     note(ui, "File › New lists the .dotx and .dotm templates here under Personal; Save as Word Template starts here.");
+}
+
+/// Fork: the default folder for new documents. Set, a new document is saved there as
+/// `Documento AAAA-MM-DD HHhMM.docx` once first edited; empty, Save As asks once.
+fn new_documents_folder(app: &mut WordApp, ui: &mut Ui) {
+    let saved = app.session.prefs.new_documents_folder.clone().unwrap_or_default();
+    let id = egui::Id::unique("options_new_documents_folder");
+    let mut folder = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_else(|| saved.clone());
+    let label = ui.label(tl!("Pasta padrão para novos documentos:")).id;
+    ui.horizontal(|ui| {
+        let hint = tl!("Vazio: perguntar onde salvar");
+        let r = ui.add(egui::TextEdit::singleline(&mut folder).desired_width(320.0).hint_text(hint)).labelled_by(label);
+        let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        let changed = folder.trim() != saved;
+        if ui.add_enabled(changed, egui::Button::new(tl!("Apply"))).clicked() || (enter && changed) {
+            let value = if folder.trim().is_empty() { "auto" } else { folder.trim() };
+            match app.run("file.options", json!({"newDocumentsFolder": value})) {
+                Ok(_) => folder = app.session.prefs.new_documents_folder.clone().unwrap_or_default(),
+                Err(e) => app.status(e),
+            }
+        }
+        if ui.add_enabled(!saved.is_empty(), egui::Button::new(tl!("Clear"))).clicked()
+            && app.run("file.options", json!({"newDocumentsFolder": "auto"})).is_ok()
+        {
+            folder.clear();
+        }
+    });
+    ui.data_mut(|d| d.insert_temp(id, folder));
+    note(
+        ui,
+        "Com o salvamento automático ligado, um documento novo é salvo nesta pasta como \"Documento AAAA-MM-DD HHhMM.docx\" logo após a primeira edição. Vazio: o programa pergunta uma vez onde salvar.",
+    );
 }
 
 fn agents(ui: &mut Ui) {
