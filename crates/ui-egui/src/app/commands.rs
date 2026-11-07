@@ -44,6 +44,10 @@ impl WordApp {
             self.dialog = dialogs::Dialog::open(name, self);
             return Ok(json!({"pending": name}));
         }
+        // Fork: a document AutoSave covers is saved now instead of asking, as Word does.
+        if refused.is_none() && discards_document(id, &params) && !self.closes_only_its_window(id, &params) {
+            self.fork_save_before_discard();
+        }
         // The same unsaved work the control channel's refusal covers, so the prompt and the
         // refusal can't drift apart (#3274).
         if (self.document_unsaved() || refused.is_some()) && discards_document(id, &params) && !self.closes_only_its_window(id, &params) {

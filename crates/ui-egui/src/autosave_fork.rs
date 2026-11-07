@@ -166,6 +166,20 @@ impl WordApp {
         self.fork_backup(&path).inspect_err(|_| self.autosave_path = None)
     }
 
+    /// Closing (or quitting, or anything else that would discard it) a document AutoSave covers:
+    /// save its last changes now, after the original's backup, so nothing asks Save / Don't Save
+    /// for edits AutoSave hadn't written yet. A failure is shown and the usual question follows.
+    pub(crate) fn fork_save_before_discard(&mut self) {
+        if !self.autosaves() || !self.session.dirty {
+            return;
+        }
+        let saved = self.fork_backup_before_autosave().and_then(|()| self.session.run("file.save", &json!({})).map_err(|e| e.to_string()));
+        if let Err(e) = saved {
+            log::warn!("AutoSave before closing failed: {e}");
+            self.status(i18n::fmt(tl!("Não foi possível salvar automaticamente ao fechar: {error}"), &[("error", &e)]));
+        }
+    }
+
     /// A new document with changes, once the user pauses: ask once where to save it (or save it
     /// in the default folder), so AutoSave can cover it from then on.
     pub(crate) fn fork_ask_where_to_save(&mut self, now: f64) {

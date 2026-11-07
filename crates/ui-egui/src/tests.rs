@@ -2972,6 +2972,8 @@ fn window_close_save_writes_the_file_and_quits() {
     let dir = scratch("close-save");
     let path = docx_on_disk(&dir, "Draft");
     let mut a = app();
+    // Fork: with AutoSave on, closing would save without asking.
+    a.autosave = false;
     a.run("file.open", json!({"path": path.to_string_lossy()})).unwrap();
     a.run("text.insert", json!({"text": "Revised "})).unwrap();
     assert!(!a.close_requested());
@@ -3113,6 +3115,8 @@ fn enter_answers_with_the_focused_button() {
         let path = docx_on_disk(&dir, "Draft");
         let before = std::fs::read(&path).unwrap();
         let mut a = app();
+        // Fork: with AutoSave on, closing would save without asking.
+        a.autosave = false;
         a.run("file.open", json!({"path": path.to_string_lossy()})).unwrap();
         a.run("text.insert", json!({"text": "Revised "})).unwrap();
         a.run("file.close", json!({})).unwrap();
@@ -3166,6 +3170,8 @@ fn arrow_keys_choose_the_save_prompt_answer() {
         let path = docx_on_disk(&dir, "Draft");
         let before = std::fs::read(&path).unwrap();
         let mut a = app();
+        // Fork: with AutoSave on, closing would save without asking.
+        a.autosave = false;
         a.run("file.open", json!({"path": path.to_string_lossy()})).unwrap();
         a.run("text.insert", json!({"text": "Revised "})).unwrap();
         a.run("file.close", json!({})).unwrap();
@@ -3214,6 +3220,8 @@ fn save_prompt_takes_focus_from_the_page() {
     let path = docx_on_disk(&dir, "Draft");
     let before = std::fs::read(&path).unwrap();
     let mut a = app();
+    // Fork: with AutoSave on, closing would save without asking.
+    a.autosave = false;
     a.run("file.open", json!({"path": path.to_string_lossy()})).unwrap();
     a.run("text.insert", json!({"text": "Revised "})).unwrap();
     a.canvas.want_focus = true;
@@ -3289,6 +3297,8 @@ fn save_prompt_exposes_its_context_to_accessibility() {
     let dir = scratch("save-accessibility");
     let path = docx_on_disk(&dir, "Draft");
     let mut a = app();
+    // Fork: with AutoSave on, closing would save without asking.
+    a.autosave = false;
     a.run("file.open", json!({"path": path.to_string_lossy()})).unwrap();
     a.run("text.insert", json!({"text": "Revised "})).unwrap();
     a.canvas.want_focus = true;
@@ -4382,6 +4392,8 @@ fn save_then_continue() {
     let dir = scratch("save");
     let path = docx_on_disk(&dir, "Draft");
     let mut a = app();
+    // Fork: with AutoSave on, closing would save without asking.
+    a.autosave = false;
     a.run("file.open", json!({"path": path.to_string_lossy()})).unwrap();
     a.run("text.insert", json!({"text": "Revised "})).unwrap();
     a.run("file.close", json!({})).unwrap();
@@ -5202,6 +5214,33 @@ fn opened_files_are_autosaved_after_a_backup_of_the_original() {
     assert_eq!(std::fs::read(&bak).unwrap(), before, "the backup is made once per session");
     let saved = wordcraft_engine::io::open_path(&path).unwrap();
     assert!(saved.plain_text(wordcraft_doc::StoryRef::Body).contains("Typed More Original"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Fork: closing right after an edit AutoSave hasn't written yet saves it (after the backup)
+/// instead of asking Save / Don't Save, as Word does with AutoSave on.
+#[test]
+fn closing_an_autosaved_file_saves_instead_of_asking() {
+    let dir = scratch("autosave-close");
+    let path = docx_on_disk(&dir, "Original");
+    let before = std::fs::read(&path).unwrap();
+    let mut a = app();
+    a.run("file.open", json!({"path": path.to_string_lossy()})).unwrap();
+    a.run("text.insert", json!({"text": "Last words "})).unwrap();
+    assert!(a.session.dirty);
+    a.run("file.close", json!({})).unwrap();
+    assert_eq!(prompt(&a), None, "nothing to ask: the change was saved");
+    let saved = wordcraft_engine::io::open_path(&path).unwrap();
+    assert!(saved.plain_text(wordcraft_doc::StoryRef::Body).contains("Last words Original"));
+    assert_eq!(std::fs::read(dir.join("contract.docx.bak")).unwrap(), before);
+
+    // Without AutoSave the question stays.
+    let mut b = app();
+    b.autosave = false;
+    b.run("file.open", json!({"path": path.to_string_lossy()})).unwrap();
+    b.run("text.insert", json!({"text": "More "})).unwrap();
+    b.run("file.close", json!({})).unwrap();
+    assert_eq!(prompt(&b), Some("saveChanges"));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
