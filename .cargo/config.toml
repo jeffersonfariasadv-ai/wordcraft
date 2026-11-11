@@ -1,2 +1,13 @@
 [alias]
 xtask = "run --package xtask --"
+
+# Fork: builds go to target-novo. On this machine the antivirus refuses to delete the old
+# executables in target/, so every rebuild there failed.
+[build]
+target-dir = "target-novo"
+
+# Fork: embed the translations, word lists and hyphenation patterns from the craft-i18n checkout
+# next to this repository (at the SHA in craft-i18n.rev). Without it the interface is English only
+# and choosing Português (Brasil) changes nothing.
+[env]
+CRAFT_I18N_DIR = { value = "../craft-i18n", relative = true }
