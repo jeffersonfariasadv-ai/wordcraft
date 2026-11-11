@@ -72,6 +72,8 @@ pub const DATE_FORMATS: &[&str] = &[
     "d MMMM yyyy",
     "MMMM yy",
     "MMM-yy",
+    "dd 'de' MMMM 'de' yyyy",
+    "dddd, d 'de' MMMM 'de' yyyy",
     "M/d/yyyy h:mm am/pm",
     "M/d/yyyy h:mm:ss am/pm",
     "h:mm am/pm",
@@ -129,6 +131,9 @@ pub struct FieldForm {
     /// Field Codes: type the code directly.
     pub codes: bool,
     pub code: String,
+    /// The language the date samples and the default date picture follow.
+    #[serde(skip)]
+    lang: Option<String>,
     #[serde(skip)]
     bookmarks: Vec<String>,
     #[serde(skip)]
@@ -152,6 +157,7 @@ impl FieldForm {
             preserve: true,
             codes: false,
             code: String::new(),
+            lang: wordcraft_engine::cmd::default_lang(&app.session),
             bookmarks,
             merge_fields: app.session.merge.headers.clone(),
             style_switches: String::new(),
@@ -193,7 +199,8 @@ impl FieldForm {
         };
         self.style_switches.clear();
         if field_kind(name) == FieldKind::Date {
-            self.date_format = if name == "TIME" { "h:mm am/pm" } else { "M/d/yyyy" }.into();
+            self.date_format =
+                if name == "TIME" { "h:mm am/pm" } else { wordcraft_engine::cmd::insert::default_date_picture(self.lang.as_deref()) }.into();
         }
         self.code = self.instruction();
     }
@@ -333,6 +340,7 @@ pub(super) fn field_ui(app: &mut WordApp, ui: &mut Ui, f: &mut FieldForm) -> boo
 }
 
 fn field_options(ui: &mut Ui, f: &mut FieldForm, t: &Tokens) {
+    let lang = f.lang.clone();
     match field_kind(&f.name) {
         FieldKind::Date => {
             ui.label(tl!("Date formats:"));
@@ -340,7 +348,7 @@ fn field_options(ui: &mut Ui, f: &mut FieldForm, t: &Tokens) {
             egui::Frame::new().stroke(Stroke::new(1.0, t.border)).inner_margin(2.0).show(ui, |ui| {
                 egui::ScrollArea::vertical().id_salt("field_dates").max_height(170.0).auto_shrink([false, false]).show(ui, |ui| {
                     for pic in DATE_FORMATS {
-                        let sample = wordcraft_engine::cmd::insert::format_date(pic);
+                        let sample = wordcraft_engine::cmd::insert::format_date_lang(pic, lang.as_deref());
                         if ui.selectable_label(f.date_format == *pic, sample).on_hover_text(*pic).clicked() {
                             f.date_format = (*pic).to_string();
                         }

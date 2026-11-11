@@ -416,3 +416,63 @@ fn local_civil_date_follows_the_utc_offset() {
         assert!(crate::cmd::local_offset_secs(unix).abs() <= 26 * 3600);
     }
 }
+
+/// Insert ▸ Date & Time writes the full date in Portuguese ("09 de novembro de 2026"), as text or
+/// as a DATE field, and the field keeps that form when it updates.
+#[test]
+fn date_time_is_the_full_date_in_portuguese() {
+    use super::super::references::date_picture;
+    // 2026-11-09 is a Monday: 20_766 days after 1970-01-01.
+    let pt = |pic: &str| format_date_parts_lang(pic, Some("pt-BR"), 2026, 11, 9, (0, 0, 0), 20_766);
+    assert_eq!(pt("dd 'de' MMMM 'de' yyyy"), "09 de novembro de 2026");
+    assert_eq!(pt("dddd, d 'de' MMMM 'de' yyyy"), "segunda-feira, 9 de novembro de 2026");
+    assert_eq!(pt("ddd, d MMM yyyy"), "seg, 9 nov 2026");
+    assert_eq!(format_date_parts_lang("MMM", Some("pt"), 2026, 3, 9, (0, 0, 0), 20_766), "mar");
+    assert_eq!(format_date_parts_lang("ddd", Some("pt-PT"), 2026, 3, 9, (0, 0, 0), 2), "sáb", "three letters, not three bytes");
+    // Other languages, and no language, stay English.
+    assert_eq!(format_date_parts_lang("MMMM", Some("es-ES"), 2026, 11, 9, (0, 0, 0), 0), "November");
+    assert_eq!(format_date_parts_lang("MMMM", None, 2026, 11, 9, (0, 0, 0), 0), "November");
+    assert_eq!(default_date_picture(Some("pt-BR")), "dd 'de' MMMM 'de' yyyy");
+    assert_eq!(default_date_picture(Some("ptx")), "M/d/yyyy");
+    assert_eq!(default_date_picture(None), "M/d/yyyy");
+
+    let full = format_date_lang("dd 'de' MMMM 'de' yyyy", Some("pt-BR"));
+    // Fork: even in an English document (the interface's own language), the button writes the
+    // full Brazilian date, as Portuguese text.
+    let english = || {
+        let mut s = Session::new(wordcraft_doc::Document::from_text("Date: "));
+        s.set_editing_language(Some("en-US"));
+        s.run("select.all", &json!({})).unwrap();
+        s.run("review.language", &json!({"lang": "en-US"})).unwrap();
+        s.run("caret.docEnd", &json!({})).unwrap();
+        s
+    };
+    let mut s = english();
+    s.run("insert.dateTime", &json!({})).unwrap();
+    let p = s.doc.para(StoryRef::Body, &Path::top(0)).unwrap();
+    assert_eq!(p.text, format!("Date: {full}"));
+    assert_eq!(p.props_of_char(6).lang.as_deref(), Some("pt-BR"), "the date is Portuguese text");
+    assert_eq!(p.props_of_char(0).lang.as_deref(), Some("en-US"), "the rest stays English");
+
+    // As a field, it keeps the full Portuguese date when it updates and when the file reopens,
+    // though the paragraph's first text is English.
+    let mut s = english();
+    s.run("insert.dateTime", &json!({"update": true})).unwrap();
+    let field = |s: &Session| match s.doc.para(StoryRef::Body, &Path::top(0)).unwrap().objects.first() {
+        Some(wordcraft_doc::InlineObject::Field { instr, result, .. }) => (instr.clone(), result.clone()),
+        _ => panic!("a field"),
+    };
+    let (instr, result) = field(&s);
+    assert_eq!(date_picture(&instr).as_deref(), Some("dd 'de' MMMM 'de' yyyy"));
+    assert_eq!(result, full);
+    s.run("references.updateFields", &json!({"all": true})).unwrap();
+    assert_eq!(field(&s).1, full, "after Update Field");
+    super::super::references::refresh_date_fields(&mut s.doc);
+    assert_eq!(field(&s).1, full, "after reopening");
+
+    // A format given by name still follows the document's language.
+    let mut s = english();
+    s.run("insert.dateTime", &json!({"format": "MMMM d, yyyy"})).unwrap();
+    let text = s.doc.para(StoryRef::Body, &Path::top(0)).unwrap().text.clone();
+    assert_eq!(text, format!("Date: {}", format_date("MMMM d, yyyy")));
+}

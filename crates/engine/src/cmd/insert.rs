@@ -15,7 +15,10 @@ mod objects;
 
 pub(crate) use header_footer::saved_copy;
 use header_footer::{create_hf, edit_hf, header_footer, new_empty_headers, strip_headers};
-pub use items::{DropCapState, drop_cap_state, format_date, format_date_at, format_date_parts};
+pub use items::{
+    DropCapState, default_date_picture, drop_cap_state, format_date, format_date_at, format_date_at_lang, format_date_lang, format_date_parts,
+    format_date_parts_lang,
+};
 use items::{cover_page, date_time, drop_cap, drop_cap_off, field, page_number, symbol};
 use links::{bookmark, delete_bookmark, link, link_targets};
 pub use links::{bookmark_name_ok, bookmark_range, bookmark_span};
@@ -113,7 +116,7 @@ pub fn specs() -> Vec<CommandSpec> {
             s.doc.last_section.footers = Default::default();
             sel_result(s)
         }),
-        CommandSpec::new("insert.dateTime", "Date & Time", "Insert › Text", date_time).params(r#"{"format"?: "M/d/yyyy", "update"?: bool}"#),
+        CommandSpec::new("insert.dateTime", "Date & Time", "Insert › Text", date_time).params(r#"{"format"?: "M/d/yyyy" (default: "dd 'de' MMMM 'de' yyyy" in Portuguese), "update"?: bool}"#),
         CommandSpec::new("insert.symbol", "Symbol", "Insert › Symbols", symbol).params(r#"{"char": string, "font"?: family (the symbol's own font)}"#),
         CommandSpec::new("insert.field", "Field", "Insert › Text › Quick Parts", field).key("Mod+F9").params(r#"{"instr": string, "result"?: string}"#),
         // Word's Alt+Shift+D / T / P (Control+Shift+… in Word for Mac): DATE, TIME and PAGE fields.

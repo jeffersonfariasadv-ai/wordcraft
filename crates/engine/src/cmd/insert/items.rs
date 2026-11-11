@@ -41,11 +41,27 @@ pub(super) fn page_number(s: &mut Session, v: &Value) -> CmdResult {
     Ok(json!({"story": id}))
 }
 
+/// Fork: the date Insert ▸ Date & Time writes when no format is given, whatever the document's
+/// language: the full Brazilian date ("09 de novembro de 2026").
+pub const FORK_DATE_LANG: &str = "pt-BR";
+
 pub(super) fn date_time(s: &mut Session, v: &Value) -> CmdResult {
-    let fmt = p::str(v, "format").unwrap_or("M/d/yyyy");
-    let text = format_date(fmt);
+    let (fmt, lang) = match p::str(v, "format") {
+        Some(fmt) => {
+            let at_caret = s.doc.para(s.sel.focus.story, &s.sel.focus.path).and_then(|p| crate::cmd::para_lang(&s.doc, p));
+            (fmt, at_caret.or_else(|| crate::cmd::default_lang(s)))
+        }
+        None => (default_date_picture(Some(FORK_DATE_LANG)), Some(FORK_DATE_LANG.to_string())),
+    };
+    let text = format_date_lang(fmt, lang.as_deref());
+    let base = s.typing_props();
+    // The date is text in its own language: spelling checks "novembro" as Portuguese, and a DATE
+    // field refreshes in that language (it reads its own text's language), not the document's.
+    let mut props = base.clone();
+    if is_portuguese(lang.as_deref()) {
+        props.lang = lang.clone();
+    }
     if p::bool(v, "update").unwrap_or(false) {
-        let props = s.typing_props();
         let at = delete_selection(s)?;
         let end = s.doc.insert_object(
             &at,
@@ -54,32 +70,70 @@ pub(super) fn date_time(s: &mut Session, v: &Value) -> CmdResult {
         )?;
         s.sel = Selection::caret(end);
     } else {
-        type_text(s, &text)?;
+        s.pending = Some(props);
+        let r = type_text(s, &text);
+        // Typing on after the date goes on in the text's own language.
+        s.pending = Some(base);
+        r?;
     }
     sel_result(s)
 }
 
+/// Whether `lang` (a BCP 47 tag such as `pt-BR`) is Portuguese.
+fn is_portuguese(lang: Option<&str>) -> bool {
+    lang.is_some_and(|l| l.eq_ignore_ascii_case("pt") || l.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("pt-") || p.eq_ignore_ascii_case("pt_")))
+}
+
+/// The date picture used when none is given: the full date in Portuguese ("09 de novembro de
+/// 2026"), Word's short numeric one otherwise.
+pub fn default_date_picture(lang: Option<&str>) -> &'static str {
+    if is_portuguese(lang) { "dd 'de' MMMM 'de' yyyy" } else { "M/d/yyyy" }
+}
+
 /// Format today's date with a Word picture (`M/d/yyyy`, `MMMM d, yyyy`, `yyyy-MM-dd`, `dddd`…).
 pub fn format_date(fmt: &str) -> String {
+    format_date_lang(fmt, None)
+}
+
+/// [`format_date`] with month and day names in `lang` (English when it is `None` or not supported).
+pub fn format_date_lang(fmt: &str, lang: Option<&str>) -> String {
     // Word shows the computer's local date and time (#1707), not UTC's.
     let now = crate::cmd::now_unix();
-    format_date_at(fmt, now, crate::cmd::local_offset_secs(now))
+    format_date_at_lang(fmt, lang, now, crate::cmd::local_offset_secs(now))
 }
 
 /// Format the instant `unix` (seconds since the epoch, UTC) with a Word picture, in the zone
 /// `offset_secs` east of UTC.
 pub fn format_date_at(fmt: &str, unix: u64, offset_secs: i64) -> String {
+    format_date_at_lang(fmt, None, unix, offset_secs)
+}
+
+/// [`format_date_at`] with month and day names in `lang`.
+pub fn format_date_at_lang(fmt: &str, lang: Option<&str>, unix: u64, offset_secs: i64) -> String {
     let (y, m, d, hms, days) = crate::cmd::local_civil(unix, offset_secs);
-    format_date_parts(fmt, y, m as usize, d, hms, days)
+    format_date_parts_lang(fmt, lang, y, m as usize, d, hms, days)
 }
 
 /// Format a date and time with a Word picture; `days_since` (days since 1970-01-01) gives the weekday.
-pub fn format_date_parts(fmt: &str, y: i64, m: usize, d: u32, (hh, mm, ss): (u32, u32, u32), days_since: i64) -> String {
+pub fn format_date_parts(fmt: &str, y: i64, m: usize, d: u32, hms: (u32, u32, u32), days_since: i64) -> String {
+    format_date_parts_lang(fmt, None, y, m, d, hms, days_since)
+}
+
+/// [`format_date_parts`] with month and day names in `lang`: Portuguese ones are lower case, as the
+/// language writes them (`novembro`, `segunda-feira`); any other language is English.
+pub fn format_date_parts_lang(fmt: &str, lang: Option<&str>, y: i64, m: usize, d: u32, (hh, mm, ss): (u32, u32, u32), days_since: i64) -> String {
     const MONTHS: [&str; 12] =
         ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
     const DAYS: [&str; 7] = ["Thursday", "Friday", "Saturday", "Sunday", "Monday", "Tuesday", "Wednesday"];
-    let month = MONTHS.get(m.saturating_sub(1)).copied().unwrap_or("January");
-    let day = DAYS.get(days_since.rem_euclid(7) as usize).copied().unwrap_or("Monday");
+    const MONTHS_PT: [&str; 12] =
+        ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+    const DAYS_PT: [&str; 7] = ["quinta-feira", "sexta-feira", "sábado", "domingo", "segunda-feira", "terça-feira", "quarta-feira"];
+    let pt = is_portuguese(lang);
+    let (months, days) = if pt { (&MONTHS_PT, &DAYS_PT) } else { (&MONTHS, &DAYS) };
+    let month = months.get(m.saturating_sub(1)).copied().unwrap_or("January");
+    let day = days.get(days_since.rem_euclid(7) as usize).copied().unwrap_or("Monday");
+    // Three letters, counted in characters: "sábado" is "sáb".
+    let short = |name: &str| name.chars().take(3).collect::<String>();
     let mut out = String::new();
     let chars: Vec<char> = fmt.chars().collect();
     let mut i = 0;
@@ -121,11 +175,11 @@ pub fn format_date_parts(fmt: &str, y: i64, m: usize, d: u32, (hh, mm, ss): (u32
             ('y' | 'Y', 4..) => out.push_str(&format!("{y:04}")),
             ('y' | 'Y', _) => out.push_str(&format!("{:02}", y % 100)),
             ('M', 4..) => out.push_str(month),
-            ('M', 3) => out.push_str(month.get(..3).unwrap_or(month)),
+            ('M', 3) => out.push_str(&short(month)),
             ('M', 2) => out.push_str(&format!("{m:02}")),
             ('M', 1) => out.push_str(&m.to_string()),
             ('d' | 'D', 4..) => out.push_str(day),
-            ('d' | 'D', 3) => out.push_str(day.get(..3).unwrap_or(day)),
+            ('d' | 'D', 3) => out.push_str(&short(day)),
             ('d' | 'D', 2) => out.push_str(&format!("{d:02}")),
             ('d' | 'D', 1) => out.push_str(&d.to_string()),
             ('H', 2..) => out.push_str(&format!("{hh:02}")),

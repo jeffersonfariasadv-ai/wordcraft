@@ -369,8 +369,11 @@ pub fn update_fields_in(s: &mut Session, all: bool) -> Result<(), CmdError> {
             let name = wordcraft_layout::fields::field_name(instr);
             match name.as_str() {
                 "DATE" | "TIME" | "CREATEDATE" | "SAVEDATE" | "PRINTDATE" => {
-                    let pic = date_picture(instr).unwrap_or_else(|| if name == "TIME" { "h:mm am/pm".into() } else { "M/d/yyyy".into() });
-                    updates.push((k, text_result(instr, crate::cmd::insert::format_date(&pic))));
+                    let lang = field_lang(&s.doc, p, k).or_else(|| crate::cmd::default_lang(s));
+                    let pic = date_picture(instr).unwrap_or_else(|| {
+                        if name == "TIME" { "h:mm am/pm".into() } else { crate::cmd::insert::default_date_picture(lang.as_deref()).into() }
+                    });
+                    updates.push((k, text_result(instr, crate::cmd::insert::format_date_lang(&pic, lang.as_deref()))));
                 }
                 "REF" | "PAGEREF" => {
                     let f = FieldCode::parse(instr);
@@ -475,6 +478,13 @@ pub fn update_fields_in(s: &mut Session, all: bool) -> Result<(), CmdError> {
     update_toc(s)
 }
 
+/// The language (`w:lang`) of the paragraph's `k`th object, through styles and the document
+/// defaults: a date field's month and day names follow it.
+fn field_lang(doc: &wordcraft_doc::Document, p: &wordcraft_doc::Paragraph, k: usize) -> Option<String> {
+    let off = p.objects_with_offsets().nth(k).map(|(off, _)| off)?;
+    doc.styles.resolve_char(p.props.style.as_deref(), p.props_of_char(off)).lang
+}
+
 /// Refresh every unlocked `DATE` and `TIME` field to now, as Word does whenever it shows,
 /// prints or exports a document: a letter written from a template carries today's date, not the
 /// date the template was last saved (#1672).
@@ -496,8 +506,11 @@ pub fn refresh_date_fields(doc: &mut wordcraft_doc::Document) {
                     continue;
                 }
                 // Word's default picture when the code carries no `\@` switch.
-                let pic = date_picture(instr).unwrap_or_else(|| if name == "TIME" { "h:mm am/pm".into() } else { "M/d/yyyy".into() });
-                updates.push((k, text_result(instr, crate::cmd::insert::format_date(&pic))));
+                let lang = field_lang(doc, p, k);
+                let pic = date_picture(instr).unwrap_or_else(|| {
+                    if name == "TIME" { "h:mm am/pm".into() } else { crate::cmd::insert::default_date_picture(lang.as_deref()).into() }
+                });
+                updates.push((k, text_result(instr, crate::cmd::insert::format_date_lang(&pic, lang.as_deref()))));
             }
             if updates.is_empty() {
                 continue;
