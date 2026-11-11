@@ -45,15 +45,27 @@ pub(super) fn language(s: &mut Session, v: &Value) -> CmdResult {
     if lang.is_none() && no_proof.is_none() {
         return Ok(json!({"detect": s.prefs.detect_language}));
     }
-    let result = crate::cmd::format::apply(s, &|c| {
+    let make_default = p::bool(v, "default") == Some(true);
+    // Making a language the document's default marks all of its text, not only the selection:
+    // runs that name their own language (an imported English document) would keep the old one and
+    // stay flagged as misspelt. The selection is put back afterwards.
+    let saved_sel = s.sel.clone();
+    if make_default && s.sel.focus.story == StoryRef::Body {
+        s.sel = Selection { anchor: s.doc.start_of(StoryRef::Body), focus: s.doc.end_of(StoryRef::Body) };
+    }
+    let applied = crate::cmd::format::apply(s, &|c| {
         if let Some(l) = &lang {
             c.lang = Some(l.clone());
         }
         if let Some(np) = no_proof {
             c.no_proof = Some(np);
         }
-    })?;
-    if p::bool(v, "default") == Some(true) {
+    });
+    if make_default && saved_sel.focus.story == StoryRef::Body {
+        s.sel = saved_sel;
+    }
+    let result = applied?;
+    if make_default {
         s.prefs.default_language = lang;
     }
     Ok(result)

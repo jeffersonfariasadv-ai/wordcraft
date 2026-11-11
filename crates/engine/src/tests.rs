@@ -9079,6 +9079,23 @@ const INDONESIAN_TEST_AFF: &str = "SET UTF-8\nFLAG UTF-8\nTRY aniekrumgtslhbdopy
 const INDONESIAN_TEST_DIC: &str = "8\nrumah\nsekolah\nanak\nbermain\ndi\nmakan/A\nsaya\nkami\n";
 
 /// Indonesian proofing (#498) through the same commands as Review, F7, Change and Add to
+/// Setting the default language with only a caret re-marks the whole document, including runs that
+/// name another language (an imported English document), and keeps the caret where it was.
+#[test]
+fn default_language_marks_the_whole_document_not_the_selection() {
+    let mut s = s();
+    run(&mut s, "document.setText", json!({"text": "Primeira linha.\nSegunda linha."}));
+    run(&mut s, "select.all", json!({}));
+    run(&mut s, "review.language", json!({"lang": "en-US"}));
+    run(&mut s, "caret.docStart", json!({}));
+    let before = s.sel.clone();
+    run(&mut s, "review.language", json!({"lang": "pt-BR", "default": true}));
+    assert_eq!(s.sel, before, "the selection is put back");
+    run(&mut s, "select.all", json!({}));
+    assert_eq!(run(&mut s, "format.state", json!({}))["lang"], "pt-BR");
+    assert_eq!(s.doc.styles.default_chr.lang.as_deref(), Some("pt-BR"));
+}
+
 /// Dictionary.
 #[test]
 fn indonesian_proofing_through_the_review_commands() {

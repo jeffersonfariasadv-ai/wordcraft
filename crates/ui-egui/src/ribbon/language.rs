@@ -385,13 +385,17 @@ pub(crate) fn language_menu(ui: &mut Ui, app: &mut WordApp) {
         _ => String::new(),
     };
     let no_proof = st.get("noProof").and_then(Value::as_bool).unwrap_or(false);
+    let collapsed = app.session.sel.is_collapsed();
     let entries = short_languages();
     let checks = language_checks(&current, &entries);
     if checks.extra.is_some() {
         mi_check(ui, app, &display_name(Some(&current)), true, "review.language", json!({"lang": current}));
     }
     for ((tag, name), on) in entries.iter().zip(checks.listed) {
-        mi_check(ui, app, &display_of(tag, name), on, "review.language", json!({"lang": tag}));
+        // With only a caret (nothing selected) the choice is the whole document's language, so the
+        // red underlines of an imported document in another language go at once and it stays saved.
+        let params = if collapsed { json!({"lang": tag, "default": true}) } else { json!({"lang": tag}) };
+        mi_check(ui, app, &display_of(tag, name), on, "review.language", params);
     }
     ui.separator();
     mi_check(ui, app, "Do Not Check Spelling or Grammar", no_proof, "review.language", json!({"noProof": !no_proof}));
