@@ -4993,3 +4993,46 @@ fn a_pictures_corrections_and_crop_change_its_page_key() {
     assert_ne!(plain, pages::page_content_key(&at([0.1, 0.0, 0.0, 0.0], PicFx::default())), "crop");
     assert_ne!(plain, pages::page_content_key(&at([0.0; 4], PicFx::new(10_000, 0, 0))), "brightness");
 }
+
+/// Double-clicking a shape puts the caret in it, as in Word: what is typed next goes inside the
+/// shape, which stays (rather than being replaced by the text). Each press and release has its
+/// own frame, as a real mouse's do.
+#[test]
+fn double_click_on_a_shape_types_in_it() {
+    let mut a = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), Default::default());
+    a.run("insert.shape", json!({"kind": "ellipse", "width": 150, "height": 100})).unwrap();
+    let pos = wordcraft_engine::cmd::objects::selected(&a.session).unwrap().0;
+    let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).with_step_dt(1.0 / 60.0).build_ui_state(
+        |ui, app: &mut WordApp| {
+            let ctx = ui.ctx().clone();
+            app.logic(&ctx);
+            app.ui(ui);
+        },
+        a,
+    );
+    for _ in 0..6 {
+        h.step();
+    }
+    let rect = h.state_mut().session.layout().object(&pos, 0).expect("the shape is laid out").rect;
+    let at = crate::frame::to_screen(h.state().canvas.page_rects[0], h.state().canvas.scale, rect).center();
+    h.event(egui::Event::PointerMoved(at));
+    h.step();
+    for _ in 0..2 {
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() });
+            h.step();
+        }
+    }
+    for _ in 0..3 {
+        h.step();
+    }
+    let s = &h.state().session;
+    let wordcraft_doc::StoryRef::Part(id) = s.sel.focus.story else { panic!("the caret is in the shape: {:?}", s.sel) };
+    h.state_mut().run("text.insert", json!({"text": "Hi"})).unwrap();
+    let s = &h.state().session;
+    assert_eq!(s.doc.plain_text(wordcraft_doc::StoryRef::Part(id)).trim(), "Hi");
+    assert!(
+        matches!(s.doc.para_at(&pos).and_then(|q| q.object_at(pos.off)), Some(wordcraft_doc::para::InlineObject::Shape { story: Some(_), .. })),
+        "the shape stays, holding the text"
+    );
+}

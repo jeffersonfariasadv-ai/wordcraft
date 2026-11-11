@@ -54,7 +54,11 @@ pub(crate) fn bg(ui: &Ui, r: Rect, resp: &Response, checked: bool, t: &Tokens) {
 /// continues without another click, as in Word (#686). Interface commands (`ui.*`) open dialogs,
 /// panes and tabs that take focus themselves, so they keep it.
 pub(crate) fn run_from_ribbon(app: &mut WordApp, id: &str, params: Value) {
-    let _ = app.run(id, params);
+    let ran = app.run(id, params).is_ok();
+    // As Word: a shape just inserted brings up Shape Format, where its fill and outline colours are.
+    if ran && id == "insert.shape" && crate::ribbon::has_shape_selected(&app.session) {
+        let _ = app.run("ui.tab", serde_json::json!({"tab": "Shape Format"}));
+    }
     if !id.starts_with("ui.") {
         app.canvas.want_focus = true;
     }

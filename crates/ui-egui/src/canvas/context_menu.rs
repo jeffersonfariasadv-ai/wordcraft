@@ -158,6 +158,9 @@ pub(super) fn context_menu(app: &mut WordApp, ui: &mut Ui) {
     if object {
         ui.menu_button(tl!("Wrap Text"), |ui| crate::ribbon::wrap_text_items(ui, app));
     }
+    if crate::widgets::enabled(app, "shape.addText") {
+        item(ui, app, "Add Text", "shape.addText", json!({}));
+    }
     if crate::widgets::enabled(app, "shape.fill") {
         item(ui, app, "Format Shape…", "view.formatShapePane", json!({"value": true}));
     }

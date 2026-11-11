@@ -5,7 +5,7 @@ use super::select::{
     all_objects, alt_text, can_group, edit_obj, has_floating, has_group, has_movable, has_object, has_picture, has_placeable, has_shape,
     has_shape_or_canvas, has_sizable, obj_size, objects_list, selected, with_float, with_obj,
 };
-use super::shape::{NO_TEXT_BOX, can_link, has_text_box, link_text_box, set_text_body, shape_effects, text_box_target};
+use super::shape::{NO_TEXT_BOX, add_text, can_add_text, can_link, has_text_box, link_text_box, set_text_body, shape_effects, text_box_target};
 use super::{CmdError, CommandSpec, InlineObject, Pos, Rgb, Selection, Spin, TextVert, VAlign, Wrap, WrapText, json, p, sel_result};
 use wordcraft_doc::picfx::PicFx;
 
@@ -322,6 +322,9 @@ pub fn specs() -> Vec<CommandSpec> {
         })
         .params(r#"{"kind": string}"#)
         .when(has_shape),
+        CommandSpec::new("shape.addText", "Add Text", "Shape Format › Text", add_text)
+            .params(r#"{}  (type in the selected shape: a shape with no text gets some, centred; the caret goes to the end of its text)"#)
+            .when(can_add_text),
         CommandSpec::new("shape.textDirection", "Text Direction", "Shape Format › Text", |s, v| {
             let dir = p::str(v, "dir").unwrap_or("horz");
             let vert = match dir {

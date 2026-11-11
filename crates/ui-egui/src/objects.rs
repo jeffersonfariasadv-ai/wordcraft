@@ -361,6 +361,19 @@ pub fn pointer(app: &mut WordApp, ui: &Ui, resp: &egui::Response, pages: &[Rect]
         let _ = app.run("smartArt.textPane", json!({"value": true}));
         return true;
     }
+    // Double-click a shape to type in it, as in Word: the second press on the shape the first
+    // selected (presses are counted as they go down, as the text's are).
+    if pressed && grab == Grab::Move && object.member.is_none() {
+        let now = ui.input(|i| i.time);
+        let (delay, dist) = ui.ctx().options(|o| (o.input_options.max_double_click_delay, o.input_options.max_click_dist));
+        let clicks = crate::canvas::press_count(app.canvas.last_press, now, at, delay, dist);
+        app.canvas.last_press = Some((now, at, clicks));
+        if clicks == 2 && selected(app).is_some_and(|(p, _)| p == object.pos()) && crate::widgets::enabled(app, "shape.addText") {
+            let _ = app.run("shape.addText", json!({}));
+            app.canvas.want_focus = true;
+            return true;
+        }
+    }
     // Shift/Ctrl+click adds an object to the selected ones (or takes it out), for Group.
     let adding = ui.input(|i| i.modifiers.shift || i.modifiers.command);
     if let Some(index) = object.member.filter(|_| pressed && !adding) {

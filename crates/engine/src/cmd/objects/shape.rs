@@ -1,5 +1,5 @@
 use super::select::{all_objects, edit_obj, picked_objects, selected, selected_all};
-use super::{CmdError, CmdResult, InlineObject, Pos, Rgb, Session, StoryRef, TextBody, Value, json, p};
+use super::{CmdError, CmdResult, InlineObject, Pos, Rgb, Selection, Session, StoryRef, TextBody, VAlign, Value, json, p};
 
 pub(super) const NO_TEXT_BOX: &str = "select a text box first";
 
@@ -168,4 +168,50 @@ pub(super) fn shape_effects(s: &mut Session, v: &Value) -> CmdResult {
         }
     }
     Ok(json!({"shapes": targets.len(), "effects": serde_json::to_value(last).unwrap_or(Value::Null)}))
+}
+
+/// `shape.addText` (right-click › Add Text, or a double-click): type in the selected shape. A
+/// shape with no text yet gets an empty story, centred across and down in white as in Word; the
+/// caret goes to the end of its text. Lines and connectors hold no text.
+pub(super) fn add_text(s: &mut Session, _: &Value) -> CmdResult {
+    use wordcraft_doc::{Align, CharProps, TextColor};
+    let Some((pos, InlineObject::Shape { kind, story, .. })) = selected(s) else {
+        return Err(CmdError::Disabled("select a shape first".into()));
+    };
+    if kind.is_open() {
+        return Err(CmdError::Disabled("lines and connectors don't hold text".into()));
+    }
+    // The shape itself, not a member of a Drawing Canvas or group.
+    if !matches!(s.doc.para_at(&pos).and_then(|q| q.object_at(pos.off)), Some(InlineObject::Shape { .. })) {
+        return Err(CmdError::Disabled("select a single shape first".into()));
+    }
+    let id = match story.filter(|id| is_text_box(s, *id)) {
+        Some(id) => id,
+        None => {
+            let props = CharProps { color: Some(TextColor::Rgb(Rgb::WHITE)), ..Default::default() };
+            let mut para = wordcraft_doc::para::Paragraph::with_text("", props.clone());
+            para.props.align = Some(Align::Center);
+            para.mark = props;
+            let id = s.doc.try_add_part(wordcraft_doc::PartKind::TextBox, vec![wordcraft_doc::para_block(para)])?;
+            if let Some(part) = s.doc.parts.get_mut(&id) {
+                part.body.anchor = VAlign::Center;
+            }
+            edit_obj(s, &pos, |o| {
+                if let InlineObject::Shape { story, .. } = o {
+                    *story = Some(id);
+                }
+            })?;
+            id
+        }
+    };
+    s.sel = Selection::caret(s.doc.end_of(StoryRef::Part(id)));
+    Ok(json!({"story": id}))
+}
+
+/// Why Add Text is off: no shape that can hold text is selected.
+pub(super) fn can_add_text(s: &Session) -> Option<&'static str> {
+    match selected(s) {
+        Some((_, InlineObject::Shape { kind, .. })) if !kind.is_open() => None,
+        _ => Some("select a shape first"),
+    }
 }

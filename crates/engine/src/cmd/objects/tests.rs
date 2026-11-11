@@ -1159,6 +1159,38 @@ fn header_pictures_can_be_resized_and_dragged() {
     assert!((u.rect.x - 200.0).abs() < 1.0 && (u.rect.y - 60.0).abs() < 1.0, "{:?}", u.rect);
 }
 
+/// Add Text (a double-click on a shape): the selected shape gets text, centred, that the caret
+/// types into, saved in the file and undone in one step; a second Add Text reuses it; lines can't
+/// hold text.
+#[test]
+fn add_text_types_into_a_shape() {
+    let mut s = Session::new(wordcraft_doc::Document::new());
+    assert!(s.run("shape.addText", &json!({})).is_err(), "nothing selected");
+    s.run("insert.shape", &json!({"kind": "ellipse"})).unwrap();
+    let pos = selected(&s).unwrap().0;
+    let id = s.run("shape.addText", &json!({})).unwrap()["story"].as_u64().unwrap() as u32;
+    assert_eq!(s.sel.focus.story, StoryRef::Part(id), "the caret is in the shape");
+    s.run("text.insert", &json!({"text": "Hello"})).unwrap();
+    assert_eq!(s.doc.plain_text(StoryRef::Part(id)).trim(), "Hello");
+    assert_eq!(s.doc.parts.get(&id).unwrap().body.anchor, VAlign::Center);
+    match s.doc.para_at(&pos).and_then(|q| q.object_at(pos.off)) {
+        Some(InlineObject::Shape { kind: wordcraft_doc::para::ShapeKind::Ellipse, story: Some(story), .. }) => assert_eq!(*story, id),
+        o => panic!("still an ellipse, with the text: {o:?}"),
+    }
+    // Saved and read back with its text.
+    let bytes = wordcraft_docx::write(&s.doc).unwrap();
+    let back = wordcraft_docx::read(&bytes).unwrap();
+    assert!(back.parts.keys().any(|k| back.plain_text(StoryRef::Part(*k)).contains("Hello")), "the text survives a save");
+    // Selecting the shape again and adding text goes back into the same text.
+    s.run("select.range", &json!({"anchor": pos, "focus": Pos { off: pos.off + 3, ..pos.clone() }})).unwrap();
+    let again = s.run("shape.addText", &json!({})).unwrap()["story"].as_u64().unwrap() as u32;
+    assert_eq!(again, id);
+    // Lines hold no text.
+    s.run("caret.set", &json!({"pos": Pos::body(0, 0)})).unwrap();
+    s.run("insert.shape", &json!({"kind": "line"})).unwrap();
+    assert!(s.run("shape.addText", &json!({})).is_err());
+}
+
 /// Shape Format › Text (#369): direction and alignment on the box the caret is in, then
 /// Create Link to an empty box and Break Link, each one undo step.
 #[test]
