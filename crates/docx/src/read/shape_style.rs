@@ -156,6 +156,18 @@ pub(crate) fn own_fill(sppr: Option<&El>, theme: &[Rgb], group: Option<&Fill>) -
     })
 }
 
+/// What automatic text colour means in a shape filled with `fill` when its style gives the text no
+/// colour: white on a dark, mostly opaque fill (as Word shows it), else none, so automatic stays
+/// black. Without this a title in a black or navy banner came out black on black. The darkness
+/// test is the one automatic colour uses on shading (`text_color` in the layout crate).
+pub(crate) fn auto_text_on(fill: Option<&Fill>) -> Option<Rgb> {
+    let fill = fill?;
+    if matches!(fill, Fill::Solid { transparency, .. } if *transparency > 50.0) {
+        return None;
+    }
+    (fill.main_color().luma() < 100.0).then_some(Rgb::WHITE)
+}
+
 /// The paint of a shape from its properties `sppr`, falling back on its style `style` (theme
 /// colours `theme`, fill styles `styles`) for what they leave out: an explicit `a:noFill` is no
 /// fill or outline, an explicit colour wins, `a:grpFill` is the enclosing group's fill `group`,

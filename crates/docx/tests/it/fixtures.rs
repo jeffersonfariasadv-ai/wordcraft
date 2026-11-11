@@ -1014,6 +1014,38 @@ fn a_text_box_s_style_font_colour_is_read() {
     assert_eq!(d.parts[plain].body.auto_color, None);
 }
 
+/// Automatic text in a shape with a dark fill and no style text colour is white, as in Word; a
+/// light fill, a see-through one, or a style colour leave it as they were. The shape's own `fontRef`
+/// colour wins over the fill, and a run's explicit colour never reaches this (it is not automatic).
+#[test]
+fn automatic_text_in_a_dark_filled_shape_is_white() {
+    let shape = |fill: &str, style: &str| {
+        format!(
+            r#"<w:r><w:drawing><wp:anchor behindDoc="0"><wp:positionH relativeFrom="column"><wp:posOffset>0</wp:posOffset></wp:positionH><wp:positionV relativeFrom="paragraph"><wp:posOffset>0</wp:posOffset></wp:positionV><wp:extent cx="1270000" cy="635000"/><wp:wrapNone/><wp:docPr id="1" name="S"/><a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp><wps:spPr><a:prstGeom prst="rect"/>{fill}</wps:spPr>{style}<wps:txbx><w:txbxContent><w:p><w:r><w:t>In the box</w:t></w:r></w:p></w:txbxContent></wps:txbx><wps:bodyPr/></wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r>"#
+        )
+    };
+    let solid = |hex: &str| format!(r#"<a:solidFill><a:srgbClr val="{hex}"/></a:solidFill>"#);
+    let see_through = r#"<a:solidFill><a:srgbClr val="000000"><a:alpha val="10000"/></a:srgbClr></a:solidFill>"#;
+    let black_font = r#"<wps:style><a:lnRef idx="0"><a:srgbClr val="000000"/></a:lnRef><a:fillRef idx="0"><a:srgbClr val="000000"/></a:fillRef><a:effectRef idx="0"><a:srgbClr val="000000"/></a:effectRef><a:fontRef idx="minor"><a:srgbClr val="102030"/></a:fontRef></wps:style>"#;
+    let shapes = [
+        shape(&solid("002060"), ""),
+        shape(&solid("000000"), ""),
+        shape(&solid("FFFFFF"), ""),
+        shape(&solid("F2F2F2"), ""),
+        shape(see_through, ""),
+        shape("", ""),
+        shape(&solid("002060"), black_font),
+    ];
+    let d = read_body(&format!("<w:p>{}</w:p>", shapes.concat()));
+    let colors: Vec<_> = paras(&d)[0]
+        .objects
+        .iter()
+        .filter_map(|o| if let InlineObject::Shape { story: Some(id), .. } = o { Some(d.parts[id].body.auto_color) } else { None })
+        .collect();
+    let white = Some(Rgb(0xFF, 0xFF, 0xFF));
+    assert_eq!(colors, [white, white, None, None, None, None, Some(Rgb(0x10, 0x20, 0x30))]);
+}
+
 #[test]
 fn a_chart_part_is_built_once_and_only_through_a_chart_relationship() {
     let chart = r#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart><c:plotArea><c:barChart><c:ser><c:val><c:numLit><c:ptCount val="2"/><c:pt idx="0"><c:v>1</c:v></c:pt><c:pt idx="1"><c:v>2</c:v></c:pt></c:numLit></c:val></c:ser></c:barChart></c:plotArea></c:chart></c:chartSpace>"#;

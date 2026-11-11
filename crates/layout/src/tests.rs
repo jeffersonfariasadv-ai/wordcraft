@@ -6662,6 +6662,51 @@ fn automatic_text_in_a_styled_text_box_takes_the_box_s_colour() {
     assert_eq!(glyph_colors(None), (Some(Rgb::BLACK), Some(Rgb::BLACK), Some(Rgb(0, 0x80, 0))));
 }
 
+/// Automatic text colour is black, or white on a dark background: the background being the
+/// shading of the cell or paragraph the text is in, not only a highlight or shading on the text
+/// itself. A black table cell titled in automatic text read black on black. Text with a colour of
+/// its own keeps it, and its own shading goes before the cell's.
+#[test]
+fn automatic_text_on_a_dark_cell_or_paragraph_shading_is_white() {
+    use wordcraft_doc::props::TextColor;
+    let black = Rgb::BLACK;
+    let white = Rgb(0xFF, 0xFF, 0xFF);
+    let light = Rgb(0xF2, 0xF2, 0xF2);
+    let para = |text: &str, color: Option<TextColor>, run_shading: Option<Rgb>, shading: Option<Rgb>| {
+        let mut p = wordcraft_doc::Paragraph::with_text(text, wordcraft_doc::CharProps { color, shading: run_shading, ..Default::default() });
+        p.props.shading = shading;
+        wordcraft_doc::para_block(p)
+    };
+    let color_of = |d: &Document, want: &str| {
+        let items = display::page_display(d, &lay(d).pages[0], &display::DisplayOptions::default());
+        items.iter().find_map(|i| if let display::Draw::Glyphs { text, color, .. } = i { text.contains(want).then_some(*color) } else { None })
+    };
+    // A table cell.
+    let cell_of = |shading: Option<Rgb>, color: Option<TextColor>, run_shading: Option<Rgb>| {
+        let mut table = Table::new(1, 1, 300.0);
+        table.props.style = None;
+        table.rows[0].cells[0].props.shading = shading;
+        table.rows[0].cells[0].blocks = vec![para("Cell", color, run_shading, None)];
+        let mut d = Document::from_text("");
+        d.body = vec![std::sync::Arc::new(Block::Table(table))];
+        color_of(&d, "Cell")
+    };
+    assert_eq!(cell_of(Some(black), None, None), Some(white), "dark cell");
+    assert_eq!(cell_of(Some(Rgb(0, 0x20, 0x60)), None, None), Some(white), "navy cell");
+    assert_eq!(cell_of(Some(light), None, None), Some(black), "light cell");
+    assert_eq!(cell_of(None, None, None), Some(black), "no shading");
+    assert_eq!(cell_of(Some(black), Some(TextColor::Rgb(Rgb(0, 0x80, 0))), None), Some(Rgb(0, 0x80, 0)), "own colour");
+    assert_eq!(cell_of(Some(black), None, Some(light)), Some(black), "text shading goes first");
+    // A shaded paragraph in the body, and the next one, unshaded.
+    let paragraph_of = |shading: Option<Rgb>| {
+        let mut d = Document::from_text("");
+        d.body = vec![para("Shaded", None, None, shading), para("Plain", None, None, None)];
+        (color_of(&d, "Shaded"), color_of(&d, "Plain"))
+    };
+    assert_eq!(paragraph_of(Some(black)), (Some(white), Some(black)), "dark paragraph");
+    assert_eq!(paragraph_of(Some(light)), (Some(black), Some(black)), "light paragraph");
+}
+
 /// Issue #1775: a picture watermark anchored in a header that starts with a table sits in a cell;
 /// placed on the page (`o:allowincell="f"`, `layoutInCell="0"`), it's centred on the margins
 /// behind the body text on every page, not drawn in the header's cell. One laid out in the cell

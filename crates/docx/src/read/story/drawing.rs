@@ -485,6 +485,13 @@ impl Reader<'_> {
         {
             part.body.auto_color = Some(rgb);
         }
+        // No style colour: automatic text on a dark fill is white, as in Word.
+        if let Some(id) = story
+            && let Some(part) = self.doc.parts.get_mut(&id)
+            && part.body.auto_color.is_none()
+        {
+            part.body.auto_color = crate::read::shape_style::auto_text_on(fill.as_ref());
+        }
         let mut extra = ShapeExtra {
             dash: crate::read::shape_style::line_dash(ln),
             cap: wordcraft_doc::connector::LineCap::from_ooxml(ln.and_then(|e| e.attr("cap")).unwrap_or("flat")),

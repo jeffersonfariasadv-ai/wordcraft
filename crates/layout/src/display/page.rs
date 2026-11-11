@@ -128,7 +128,12 @@ fn stories_display(
             }
         };
         let mut done: Vec<u32> = Vec::new();
+        // The shading placed so far (cells, paragraphs), under the lines that follow it.
+        let mut fills: Vec<(Rect, Rgb)> = Vec::new();
         for it in items.iter() {
+            if let Placed::Fill { rect, color } = it {
+                fills.push((*rect, *color));
+            }
             // The object being dragged is drawn by its preview instead: leave it out here.
             if hidden.as_ref().is_some_and(|h| h.hides(it)) {
                 continue;
@@ -140,7 +145,7 @@ fn stories_display(
                 && turned_frame(&frames, it).is_none()
             {
                 let mut inner = Vec::new();
-                item(doc, it, opts, authors, a, &mut inner);
+                item_over(doc, it, opts, authors, a, backdrop(&fills, it), &mut inner);
                 out.push(Draw::Clip { rect, items: inner });
                 continue;
             }
@@ -173,16 +178,16 @@ fn stories_display(
                                     && let Some(rect) = cell_clip(clips, *story, &path.0)
                                 {
                                     let mut clipped = Vec::new();
-                                    item(doc, line, opts, authors, a, &mut clipped);
+                                    item_over(doc, line, opts, authors, a, backdrop(&fills, line), &mut clipped);
                                     inner.push(Draw::Clip { rect, items: clipped });
                                 } else {
-                                    item(doc, line, opts, authors, a, &mut inner);
+                                    item_over(doc, line, opts, authors, a, backdrop(&fills, line), &mut inner);
                                 }
                             }
                             super::objects::spun(*spin, *rect, inner, out);
                         }
                     }
-                    None => item(doc, it, opts, authors, a, out),
+                    None => item_over(doc, it, opts, authors, a, backdrop(&fills, it), out),
                 },
             }
         }
@@ -448,12 +453,36 @@ pub(super) fn char_box(b: &Border, x0: f32, x1: f32, top: f32, bottom: f32, alph
 }
 
 fn item(doc: &Document, it: &Placed, opts: &DisplayOptions, authors: &Authors, alpha: f32, out: &mut Vec<Draw>) {
-    item_in(doc, it, opts, authors, alpha, Spin::default(), out)
+    item_in(doc, it, opts, authors, alpha, None, Spin::default(), out)
+}
+
+/// [`item`] for a line of text drawn over the shading `backdrop`, which automatic text colour is
+/// read against.
+fn item_over(doc: &Document, it: &Placed, opts: &DisplayOptions, authors: &Authors, alpha: f32, backdrop: Option<Rgb>, out: &mut Vec<Draw>) {
+    item_in(doc, it, opts, authors, alpha, backdrop, Spin::default(), out)
+}
+
+/// The shading a line of text sits on: the last (topmost) of the `fills` placed before it that
+/// holds the middle of its first line; `None` for anything but lines, or text on the page itself.
+fn backdrop(fills: &[(Rect, Rgb)], it: &Placed) -> Option<Rgb> {
+    let Placed::Lines { para, l0, x, y, .. } = it else { return None };
+    let (px, py) = (*x + 0.5, *y + para.lines.get(*l0).map_or(0.0, |l| l.height) / 2.0);
+    fills.iter().rev().find(|(r, _)| px >= r.x && px <= r.right() && py >= r.y && py <= r.bottom()).map(|(_, c)| *c)
 }
 
 /// [`item`] drawn inside the turn `outer` (a turned Drawing Canvas's members): a shape's
 /// effects follow all the turns it is drawn inside.
-fn item_in(doc: &Document, it: &Placed, opts: &DisplayOptions, authors: &Authors, alpha: f32, outer: Spin, out: &mut Vec<Draw>) {
+#[allow(clippy::too_many_arguments)]
+fn item_in(
+    doc: &Document,
+    it: &Placed,
+    opts: &DisplayOptions,
+    authors: &Authors,
+    alpha: f32,
+    backdrop: Option<Rgb>,
+    outer: Spin,
+    out: &mut Vec<Draw>,
+) {
     match it {
         Placed::Fill { rect, color } => out.push(Draw::Fill { rect: *rect, color: *color, alpha, text_bg: false }),
         Placed::Rule { x0, y0, x1, y1, border } => out.push(rule(*x0, *y0, *x1, *y1, border, alpha)),
@@ -489,7 +518,7 @@ fn item_in(doc: &Document, it: &Placed, opts: &DisplayOptions, authors: &Authors
         Placed::Clip { rect, spin, items } => {
             let mut inner = Vec::new();
             for it in items {
-                item_in(doc, it, opts, authors, alpha, spin.within(outer), &mut inner);
+                item_in(doc, it, opts, authors, alpha, None, spin.within(outer), &mut inner);
             }
             spun(*spin, *rect, vec![Draw::Clip { rect: *rect, items: inner }], out)
         }
@@ -508,6 +537,7 @@ fn item_in(doc: &Document, it: &Placed, opts: &DisplayOptions, authors: &Authors
                     authors,
                     alpha,
                     down: *turn == TextDirection::Down,
+                    backdrop,
                 },
                 &mut items,
             );
@@ -522,9 +552,10 @@ fn item_in(doc: &Document, it: &Placed, opts: &DisplayOptions, authors: &Authors
             }
             out.push(Draw::Turned { x: *x, y: *y, turn: *turn, items });
         }
-        Placed::Lines { story, path, para, l0, l1, x, y, .. } => {
-            lines(LineRender { doc, story: *story, path, pl: para, range: *l0..*l1, origin: (*x, *y), opts, authors, alpha, down: false }, out)
-        }
+        Placed::Lines { story, path, para, l0, l1, x, y, .. } => lines(
+            LineRender { doc, story: *story, path, pl: para, range: *l0..*l1, origin: (*x, *y), opts, authors, alpha, down: false, backdrop },
+            out,
+        ),
     }
 }
 

@@ -27,6 +27,9 @@ pub(super) struct LineRender<'a, 'authors, 'author_doc> {
     pub authors: &'authors Authors<'author_doc>,
     pub alpha: f32,
     pub down: bool,
+    /// The shading of the cell or paragraph the lines are on (what automatic text colour is read
+    /// against when the text has no shading of its own).
+    pub backdrop: Option<Rgb>,
 }
 
 struct LineContext<'a, 'authors, 'author_doc> {
@@ -46,19 +49,20 @@ struct LineContext<'a, 'authors, 'author_doc> {
     alpha: f32,
     down: bool,
     auto: Option<Rgb>,
+    backdrop: Option<Rgb>,
 }
 
 impl LineContext<'_, '_, '_> {
     fn ink(&self, color: &TextColor, background: Option<Rgb>) -> Rgb {
         match (color, self.auto) {
             (TextColor::Auto, Some(rgb)) => rgb,
-            _ => text_color(color, background),
+            _ => text_color(color, background.or(self.backdrop)),
         }
     }
 }
 
 pub(super) fn lines(input: LineRender<'_, '_, '_>, out: &mut Vec<Draw>) {
-    let LineRender { doc, story, path, pl, range, origin: (x, y), opts, authors, alpha, down } = input;
+    let LineRender { doc, story, path, pl, range, origin: (x, y), opts, authors, alpha, down, backdrop } = input;
     let (l0, l1) = (range.start, range.end);
     let Some(first) = pl.lines.get(l0) else { return };
     let para = doc.para(story, path);
@@ -72,7 +76,7 @@ pub(super) fn lines(input: LineRender<'_, '_, '_>, out: &mut Vec<Draw>) {
         let top = y + (line.top - first.top);
         let base = top + (line.baseline - line.top);
         let bottom = top + line.height;
-        let ctx = LineContext { doc, story, path, pl, para, line, li, x, top, base, bottom, opts, authors, alpha, down, auto };
+        let ctx = LineContext { doc, story, path, pl, para, line, li, x, top, base, bottom, opts, authors, alpha, down, auto, backdrop };
         comment_backgrounds(&ctx, out);
         character_backgrounds(&ctx, out);
         draw_label_and_hyphen(&ctx, out);
