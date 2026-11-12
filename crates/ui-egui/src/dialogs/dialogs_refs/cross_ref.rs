@@ -47,7 +47,14 @@ impl CrossRefForm {
     /// What can be inserted for this type: (`show`, label).
     pub fn shows(&self) -> &'static [(&'static str, &'static str)] {
         match self.to.as_str() {
-            "heading" => &[("text", "Heading text"), ("page", "Page number"), ("aboveBelow", "Above/below")],
+            "heading" => &[
+                ("text", "Heading text"),
+                ("page", "Page number"),
+                ("number", "Heading number"),
+                ("numberNoContext", "Heading number (no context)"),
+                ("numberFullContext", "Heading number (full context)"),
+                ("aboveBelow", "Above/below"),
+            ],
             "bookmark" => &[("text", "Bookmark text"), ("page", "Page number"), ("aboveBelow", "Above/below")],
             _ => &[("text", "Entire caption"), ("number", "Only label and number"), ("page", "Page number"), ("aboveBelow", "Above/below")],
         }

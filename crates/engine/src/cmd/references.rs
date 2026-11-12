@@ -22,6 +22,7 @@ pub use fields::{
 };
 pub(super) use notes::note_options;
 use notes::{note, note_refs};
+pub(crate) use numbers::paragraph_number;
 pub use properties::{bookmark_text, date_picture};
 #[cfg(test)]
 use toc::cached_toc_tabs;

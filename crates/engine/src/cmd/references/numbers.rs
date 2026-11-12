@@ -123,6 +123,12 @@ pub(super) fn ref_number(numbers: &std::collections::HashMap<Path, ParaNumber>, 
     Some(out)
 }
 
+/// The number `REF \n`, `\r` or `\w` would show for the body paragraph at `target` right now,
+/// read from `from` (the field's own paragraph). `None` when the paragraph carries no number.
+pub(crate) fn paragraph_number(doc: &wordcraft_doc::Document, target: &Path, from: Option<&Path>, switch: char) -> Option<String> {
+    ref_number(&para_numbers(doc), target, from, switch)
+}
+
 /// Index the first body paragraph for each bookmark name, retaining document-order lookup semantics.
 pub(super) fn body_bookmark_paths(doc: &wordcraft_doc::Document) -> std::collections::HashMap<String, Path> {
     let mut paths = std::collections::HashMap::new();

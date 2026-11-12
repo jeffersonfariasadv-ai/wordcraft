@@ -731,7 +731,14 @@ impl StyleSheet {
             name: "TOC Heading".into(),
             based_on: Some("Heading1".into()),
             next: Some("Normal".into()),
-            para: ParaProps { outline_level: Some(9), space_before: Some(12.0), ..para() },
+            // Based on Heading 1 but never numbered: a heading-linked Multilevel List must not
+            // count "Contents" as chapter 1 (list number 0 is "no list", as `w:numId 0` is).
+            para: ParaProps {
+                outline_level: Some(9),
+                space_before: Some(12.0),
+                numbering: Some(crate::props::NumRef { num: 0, level: 0 }),
+                ..para()
+            },
             priority: Some(39),
             ..p_style()
         });

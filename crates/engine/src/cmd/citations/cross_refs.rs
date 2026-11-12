@@ -11,7 +11,21 @@ pub(super) fn cross_ref(s: &mut Session, v: &Value) -> CmdResult {
     let (text, pos) = find(targets).ok_or_else(|| CmdError::Params(format!("no {to} `{target}`")))?;
     let show = p::str(v, "show").unwrap_or("text");
     let page = page_of(s, &pos);
+    // A heading's number (`1.1`) is its list number, read as `REF \r`, `\n` or `\w` read it, so
+    // the field keeps following the heading when headings move or renumber. A caption's "number"
+    // is its label and number, the text before the colon.
+    let number_switch = if to == "heading" {
+        match show {
+            "number" | "numberRelative" => Some('r'),
+            "numberNoContext" => Some('n'),
+            "numberFullContext" => Some('w'),
+            _ => None,
+        }
+    } else {
+        None
+    };
     let result = match show {
+        _ if number_switch.is_some() => String::new(),
         "page" => page.to_string(),
         "number" => text.split(':').next().unwrap_or(&text).trim().to_string(),
         "aboveBelow" => {
@@ -28,14 +42,21 @@ pub(super) fn cross_ref(s: &mut Session, v: &Value) -> CmdResult {
     let at = delete_selection(s)?;
     // The field points at a bookmark: the named one, or a hidden `_Ref` bookmark on the target
     // paragraph (as Word does), so Update Field and Word can resolve it.
+    let mut result = result;
     let (name, at) = if to == "bookmark" {
         (text, at)
     } else {
         // Deleting the selection can move paragraphs: look the target up again.
         let (_, pos) = find(ref_targets(s, to)).ok_or_else(|| CmdError::Params(format!("no {to} `{target}`")))?;
-        ref_bookmark(s, &pos, show == "number", at)?
+        if let Some(sw) = number_switch {
+            let from = (at.story == StoryRef::Body).then_some(&at.path);
+            result = crate::cmd::references::paragraph_number(&s.doc, &pos.path, from, sw)
+                .ok_or_else(|| CmdError::Failed(format!("`{target}` has no number: number the headings first (Multilevel List)")))?;
+        }
+        ref_bookmark(s, &pos, show == "number" && to != "heading", at)?
     };
-    let instr = format!("{} {name} \\h", if show == "page" { "PAGEREF" } else { "REF" });
+    let switch = number_switch.map(|c| format!(" \\{c}")).unwrap_or_default();
+    let instr = format!("{} {name}{switch} \\h", if show == "page" { "PAGEREF" } else { "REF" });
     let end = s.doc.insert_object(
         &at,
         InlineObject::Field { instr, result: result.clone(), locked: false, dirty: false, code: false, form: String::new() },

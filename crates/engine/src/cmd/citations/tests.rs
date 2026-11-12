@@ -900,3 +900,78 @@ fn citation_refresh_source_lookup_work_scales_with_document_size() {
     let p = big.doc.para(StoryRef::Body, &Path::top(0)).unwrap();
     assert!(p.objects.iter().enumerate().all(|(i, o)| matches!(o, InlineObject::Field { result, .. } if result == &format!("[{}]", i + 1))));
 }
+
+/// A cross-reference to a heading's number (`REF \r`/`\n`/`\w`) shows its list number, follows the
+/// heading when a heading is added above it, and the TOC carries the same numbers.
+#[test]
+fn a_heading_number_cross_reference_follows_the_numbering() {
+    let mut s = Session::new(wordcraft_doc::Document::new());
+    for (i, (t, st)) in [("One", "Heading1"), ("Two", "Heading2"), ("Body", "Normal")].iter().enumerate() {
+        if i > 0 {
+            s.run("text.newParagraph", &json!({})).unwrap();
+        }
+        s.run("text.insert", &json!({"text": t})).unwrap();
+        s.run("para.style", &json!({"style": st})).unwrap();
+    }
+    s.sel = Selection::caret(Pos::body(0, 0));
+    s.run("list.multilevelPreset", &json!({"preset": "headings"})).unwrap();
+    s.sel = Selection::caret(Pos::body(2, 4));
+    s.run("text.insert", &json!({"text": " see "})).unwrap();
+    s.run("insert.crossReference", &json!({"to": "heading", "target": "Two", "show": "numberFullContext"})).unwrap();
+    s.run("insert.crossReference", &json!({"to": "heading", "target": "Two", "show": "numberNoContext"})).unwrap();
+    let t = s.doc.plain_text(StoryRef::Body);
+    assert!(t.contains("1.1") && t.contains("Body see "), "{t}");
+    let fields: Vec<String> = s
+        .doc
+        .body
+        .iter()
+        .filter_map(|b| b.as_para())
+        .flat_map(|p| p.objects.iter())
+        .filter_map(|o| match o {
+            InlineObject::Field { instr, .. } => Some(instr.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(fields.iter().any(|f| f.contains(r" \w ")) && fields.iter().any(|f| f.contains(r" \n ")), "{fields:?}");
+    // A heading added above renumbers "Two" to 2.1; the field follows on update.
+    s.sel = Selection::caret(Pos::body(0, 0));
+    s.run("text.newParagraph", &json!({})).unwrap();
+    s.sel = Selection::caret(Pos::body(0, 0));
+    s.run("text.insert", &json!({"text": "Zero"})).unwrap();
+    s.run("para.style", &json!({"style": "Heading1"})).unwrap();
+    crate::cmd::references::update_fields(&mut s).unwrap();
+    let t = s.doc.plain_text(StoryRef::Body);
+    assert!(t.contains("see 2.12.1") || t.contains("see 2.1"), "{t}");
+    assert!(!t.contains("see 1.1"), "{t}");
+}
+
+/// Headings numbered by a Multilevel List preset: the TOC lists them with their numbers, and the
+/// Format Painter carries a heading's style (so its number and look) to another paragraph.
+#[test]
+fn numbered_headings_reach_the_toc_and_the_format_painter() {
+    let mut s = Session::new(wordcraft_doc::Document::new());
+    for (i, (t, st)) in [("One", "Heading1"), ("Two", "Heading2"), ("Plain", "Normal")].iter().enumerate() {
+        if i > 0 {
+            s.run("text.newParagraph", &json!({})).unwrap();
+        }
+        s.run("text.insert", &json!({"text": t})).unwrap();
+        s.run("para.style", &json!({"style": st})).unwrap();
+    }
+    s.sel = Selection::caret(Pos::body(0, 0));
+    s.run("list.multilevelPreset", &json!({"preset": "headings"})).unwrap();
+    // Paint Heading 2 onto the plain paragraph.
+    s.sel = Selection::caret(Pos::body(1, 1));
+    s.run("edit.formatPainter", &json!({})).unwrap();
+    s.sel = Selection { anchor: Pos::body(2, 0), focus: Pos::body(2, 5) };
+    s.run("edit.pasteFormat", &json!({})).unwrap();
+    assert_eq!(s.doc.para(StoryRef::Body, &wordcraft_doc::Path(vec![2])).and_then(|p| p.props.style.clone()).as_deref(), Some("Heading2"));
+    // The TOC goes in an empty Normal paragraph above the headings.
+    s.sel = Selection::caret(Pos::body(0, 0));
+    s.run("text.newParagraph", &json!({})).unwrap();
+    s.sel = Selection::caret(Pos::body(0, 0));
+    s.run("para.style", &json!({"style": "Normal"})).unwrap();
+    s.run("references.toc", &json!({})).unwrap();
+    let t = s.doc.plain_text(StoryRef::Body);
+    assert!(t.contains("1\tOne") || t.contains("1.\tOne") || t.contains("1 One"), "{t}");
+    assert!(t.contains("1.1") && t.contains("Plain"), "{t}");
+}
