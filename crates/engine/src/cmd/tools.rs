@@ -16,6 +16,7 @@ mod actions;
 mod autocorrect;
 mod compare;
 mod inspect;
+mod pt_accents;
 mod specs;
 mod typing;
 

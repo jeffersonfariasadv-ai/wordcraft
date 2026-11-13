@@ -281,8 +281,16 @@ fn open(s: &mut Session, v: &Value) -> CmdResult {
             s.add_opened_document(doc);
         }
     }
-    if let Some(z) = s.doc.settings.zoom {
-        super::view::restore_zoom(s, z);
+    match s.doc.settings.zoom {
+        Some(z) => super::view::restore_zoom(s, z),
+        // No zoom saved with the file: one page across at 110%, so the page reads at a
+        // comfortable size instead of two small pages side by side on a wide window.
+        None => {
+            s.view.zoom = OPEN_ZOOM;
+            s.view.fit.clear();
+            s.view.multi_page = false;
+            s.view.single_column = true;
+        }
     }
     s.path = Some(path.into());
     // Like Word, a document opened with a password is saved with it again.
@@ -293,6 +301,9 @@ fn open(s: &mut Session, v: &Value) -> CmdResult {
         json!({"path": path, "paragraphs": s.doc.paragraph_count(), "words": s.doc.word_count(), "encrypted": encrypted, "alreadyOpen": false, "id": s.document_id()}),
     )
 }
+
+/// The zoom a document without a saved one opens at.
+const OPEN_ZOOM: f32 = 1.10;
 
 /// Close a document with no window to ask about it (agents, headless sessions).
 fn close_document(s: &mut Session, v: &Value) -> CmdResult {

@@ -165,11 +165,11 @@ fn member_hit(app: &WordApp, canvas: &ObjectHit, index: usize) -> Option<ObjectH
     member_with_frame(app, canvas, o, index, frame)
 }
 
-/// The canvas object of hit `canvas` when its members can be picked: a canvas, hit as a whole,
-/// not turned.
+/// The canvas (or plain group) object of hit `canvas` when its members can be picked: hit as a
+/// whole, not turned. A plain group only gives its text boxes' text ([`member_at`]).
 fn pickable_canvas<'a>(app: &'a WordApp, canvas: &ObjectHit) -> Option<&'a InlineObject> {
     let pos = canvas.pos();
-    let o = app.session.doc.para_at(&pos).and_then(|p| p.object_at(pos.off)).filter(|o| o.is_canvas())?;
+    let o = app.session.doc.para_at(&pos).and_then(|p| p.object_at(pos.off)).filter(|o| matches!(o, InlineObject::Group { .. }))?;
     (canvas.member.is_none() && canvas.spin.is_identity()).then_some(o)
 }
 
@@ -202,11 +202,15 @@ fn member_at(app: &WordApp, canvas: &ObjectHit, x: f32, y: f32, edge: f32) -> Op
     if !r.contains(wordcraft_geom::Point::new(x, y)) {
         return None;
     }
-    o.member_rects(r.x, r.y, r.w, r.h)
+    let found = o
+        .member_rects(r.x, r.y, r.w, r.h)
         .into_iter()
         .rev()
         .filter_map(|(i, frame)| member_with_frame(app, canvas, o, i, frame))
-        .find(|m| m.rect.expand(edge).contains(m.unspin(x, y)))
+        .find(|m| m.rect.expand(edge).contains(m.unspin(x, y)));
+    // A plain group (a form made of text boxes, as Word documents have) is moved as a whole;
+    // only the text of a box in it is picked, to put the caret there.
+    found.filter(|m| o.is_canvas() || in_text(m, x, y, edge))
 }
 
 /// Whether the page point (x, y) is in a text box member's text rather than on its border.

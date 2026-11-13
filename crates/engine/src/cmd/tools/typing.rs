@@ -85,6 +85,12 @@ pub fn autocorrect_word(s: &mut Session, on_enter: bool) -> Result<(), CmdError>
     // same way (#835); every English (en-GB, en-CA…) counts (#1281).
     let english = s.doc.para_at(&f).is_none_or(|_| wordcraft_proof::ProofLang::from_tag(lang.as_deref()).is_english());
     let found = if ac.replace_text { ac.replacement_in(&word, english) } else { None };
+    // Portuguese typed without its accents and cedillas gets them ("nao " → "não ").
+    let found = found.or_else(|| {
+        let proof_lang = wordcraft_proof::ProofLang::from_tag(lang.as_deref());
+        let portuguese = lang.as_deref().is_some_and(|t| t.to_ascii_lowercase().starts_with("pt"));
+        (ac.replace_text && portuguese).then(|| super::pt_accents::accent_fix(&word, proof_lang)).flatten()
+    });
     let (from, rep) = match found {
         Some(r) => (start, Some(r)),
         None if ac.replace_text && word.len() > 3 && word.ends_with("...") => (start + word.len() - 3, Some("…".to_string())),

@@ -3837,3 +3837,29 @@ fn issues_1281_1045_english_dialects_proof_typed_text() {
     let words: Vec<&str> = issues.as_array().unwrap().iter().filter(|i| i["kind"] == "spelling").filter_map(|i| i["text"].as_str()).collect();
     assert_eq!(words, ["21th"]);
 }
+
+#[test]
+fn portuguese_gets_its_accents_as_you_type() {
+    let mut pt = s();
+    run(&mut pt, "review.language", json!({"lang": "pt-BR", "default": true}));
+    typ(&mut pt, "Nao ha procuracao, tambem. Mas esta ");
+    assert_eq!(pt.doc.plain_text(StoryRef::Body), "Não há procuração, também. Mas esta ");
+    // English text keeps its words.
+    let mut e = s();
+    run(&mut e, "review.language", json!({"lang": "en-US", "default": true}));
+    typ(&mut e, "nao ");
+    assert_eq!(e.doc.plain_text(StoryRef::Body), "Nao ");
+}
+
+#[test]
+fn a_document_without_a_saved_zoom_opens_one_page_wide_at_110_percent() {
+    let dir = std::env::temp_dir().join(format!("wc-open-zoom-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("a.txt");
+    std::fs::write(&path, "Olá").unwrap();
+    let mut sess = s();
+    run(&mut sess, "file.open", json!({"path": path.to_string_lossy()}));
+    assert!((sess.view.zoom - 1.10).abs() < 1e-6);
+    assert!(sess.view.single_column && !sess.view.multi_page && sess.view.fit.is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}
