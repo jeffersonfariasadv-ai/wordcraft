@@ -466,7 +466,10 @@ fn item_over(doc: &Document, it: &Placed, opts: &DisplayOptions, authors: &Autho
 /// holds the middle of its first line; `None` for anything but lines, or text on the page itself.
 fn backdrop(fills: &[(Rect, Rgb)], it: &Placed) -> Option<Rgb> {
     let Placed::Lines { para, l0, x, y, .. } = it else { return None };
-    let (px, py) = (*x + 0.5, *y + para.lines.get(*l0).map_or(0.0, |l| l.height) / 2.0);
+    // The middle of the line's own extent: `x` is the paragraph's origin, left of an indent, and
+    // a shading (and so a numbered heading's black fill) starts at the indent.
+    let line = para.lines.get(*l0);
+    let (px, py) = (*x + line.map_or(0.0, |l| (l.left + l.right) / 2.0).max(0.5), *y + line.map_or(0.0, |l| l.height) / 2.0);
     fills.iter().rev().find(|(r, _)| px >= r.x && px <= r.right() && py >= r.y && py <= r.bottom()).map(|(_, c)| *c)
 }
 

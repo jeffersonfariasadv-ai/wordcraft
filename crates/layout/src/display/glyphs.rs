@@ -63,8 +63,8 @@ pub fn check_box(frame: Rect, checked: bool, color: Rgb, alpha: f32, out: &mut V
 }
 
 /// The least contrast (WCAG, 1 to 21) a text colour keeps against the fill under it before
-/// [`text_color`] swaps it for black or white. Under it, text is as good as lost.
-const MIN_TEXT_CONTRAST: f32 = 2.0;
+/// [`text_color`] swaps it for black or white. Under it (WCAG's floor for large text), text is as good as lost.
+const MIN_TEXT_CONTRAST: f32 = 3.0;
 
 fn relative_luminance(c: Rgb) -> f32 {
     let lin = |v: u8| {

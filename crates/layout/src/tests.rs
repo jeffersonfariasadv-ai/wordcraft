@@ -14471,3 +14471,21 @@ fn turned_cell_float_keeps_its_along_text_offset() {
         assert!((confined.y - reference.y).abs() < 0.01, "{direction:?}: {confined:?} vs {reference:?}");
     }
 }
+
+/// A heading style's own colour (dark teal) on a black paragraph, and its numbering label, are
+/// drawn white: the label of a numbered title vanished into the black.
+#[test]
+fn a_heading_colour_and_its_number_label_stay_readable_on_black() {
+    let mut d = Document::new();
+    let list = std::sync::Arc::make_mut(&mut d.numbering).add_list(wordcraft_doc::ListKind::NumberedParen);
+    let mut p = wordcraft_doc::Paragraph::with_text("Heading", Default::default());
+    p.props.style = Some("Heading1".into());
+    p.props.shading = Some(Rgb::BLACK);
+    p.props.numbering = Some(wordcraft_doc::props::NumRef { num: list, level: 0 });
+    d.body = vec![wordcraft_doc::para_block(p)];
+    let items = display::page_display(&d, &lay(&d).pages[0], &display::DisplayOptions::default());
+    let glyphs: Vec<(String, Rgb)> =
+        items.iter().filter_map(|i| if let display::Draw::Glyphs { text, color, .. } = i { Some((text.clone(), *color)) } else { None }).collect();
+    assert!(glyphs.len() >= 2, "text and label: {glyphs:?}");
+    assert!(glyphs.iter().all(|(_, c)| *c == Rgb(0xFF, 0xFF, 0xFF)), "{glyphs:?}");
+}
