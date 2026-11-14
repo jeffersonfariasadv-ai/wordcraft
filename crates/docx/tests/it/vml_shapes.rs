@@ -296,3 +296,17 @@ fn a_preset_takes_its_gradient_from_the_shapetype() {
         assert_eq!((kind, fill), (ShapeKind::Diamond, Some(want.clone())));
     }
 }
+
+#[test]
+fn a_coordorigin_with_an_empty_part_is_zero_there() {
+    // Word writes `coordorigin=",-2390"` for a group whose members start above its top.
+    let d = read_body(&pict(concat!(
+        r#"<v:group style="width:100pt;height:100pt" coordsize="1000,1000" coordorigin=",-2390">"#,
+        r#"<v:rect style="left:0;top:-2390;width:100;height:100"/>"#,
+        r#"<v:rect style="left:300;top:-2290;width:100;height:100"/>"#,
+        r#"</v:group>"#,
+    )));
+    let InlineObject::Group { children, .. } = &objects(&d)[0] else { panic!() };
+    assert_eq!((children[0].x, children[0].y), (0.0, 0.0), "the member at the origin sits at the group's corner");
+    assert_eq!((children[1].x, children[1].y), (300.0, 100.0));
+}

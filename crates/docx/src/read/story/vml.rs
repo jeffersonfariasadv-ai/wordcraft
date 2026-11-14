@@ -470,7 +470,8 @@ fn vml_spt(shape: &El, shapetype: Option<&El>, type_id: Option<&str>) -> Option<
 fn vml_coordpair(e: &El, name: &str) -> Option<(f32, f32)> {
     let v = e.attr(name)?;
     let (x, y) = v.split_once(',')?;
-    let n = |s: &str| measure(s.trim(), 1.0).map(wordcraft_geom::finite);
+    // An empty part is 0: Word writes `coordorigin=",-2390"`.
+    let n = |s: &str| if s.trim().is_empty() { Some(0.0) } else { measure(s.trim(), 1.0).map(wordcraft_geom::finite) };
     Some((n(x)?, n(y)?))
 }
 

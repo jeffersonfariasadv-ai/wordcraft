@@ -117,7 +117,9 @@ pub fn vml_path(path: &str, coordsize: Option<&str>, coordorigin: Option<&str>, 
         let v = v?;
         let (a, b) = v.split_once(',').unwrap_or((v, ""));
         let n = |s: &str| int(s).map(|i| (i as f64).clamp(-MAX_VML, MAX_VML));
-        Some((n(a)?, n(b).unwrap_or(0.0)))
+        // An empty part is 0 (`coordorigin=",-2390"`, as Word writes it).
+        let part = |s: &str| if s.trim().is_empty() { Some(0.0) } else { n(s) };
+        Some((part(a)?, part(b).unwrap_or(0.0)))
     };
     let size = |v: f64| if v > 0.0 { v } else { 1000.0 };
     let (cw, ch) = pair(coordsize).map_or((1000.0, 1000.0), |(a, b)| (size(a), size(b)));
