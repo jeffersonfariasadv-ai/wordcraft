@@ -6707,6 +6707,27 @@ fn automatic_text_on_a_dark_cell_or_paragraph_shading_is_white() {
     assert_eq!(paragraph_of(Some(light)), (Some(black), Some(black)), "light paragraph");
 }
 
+/// A text colour that can hardly be told from the shading under it (a dark heading colour on a
+/// black paragraph) is drawn white, or black on a light fill; a colour that reads well stays.
+#[test]
+fn text_colour_lost_on_its_shading_is_swapped_for_black_or_white() {
+    use wordcraft_doc::props::TextColor;
+    let teal = Rgb(0x0E, 0x28, 0x41);
+    let color_on = |text: Rgb, shading: Rgb| {
+        let mut p =
+            wordcraft_doc::Paragraph::with_text("Heading", wordcraft_doc::CharProps { color: Some(TextColor::Rgb(text)), ..Default::default() });
+        p.props.shading = Some(shading);
+        let mut d = Document::from_text("");
+        d.body = vec![wordcraft_doc::para_block(p)];
+        let items = display::page_display(&d, &lay(&d).pages[0], &display::DisplayOptions::default());
+        items.iter().find_map(|i| if let display::Draw::Glyphs { text, color, .. } = i { text.contains("Heading").then_some(*color) } else { None })
+    };
+    assert_eq!(color_on(teal, Rgb::BLACK), Some(Rgb(0xFF, 0xFF, 0xFF)), "dark on black");
+    assert_eq!(color_on(Rgb(0xFF, 0xF2, 0xCC), Rgb(0xFF, 0xFF, 0x00)), Some(Rgb::BLACK), "pale on yellow");
+    assert_eq!(color_on(Rgb(0xFF, 0xFF, 0xFF), Rgb::BLACK), Some(Rgb(0xFF, 0xFF, 0xFF)), "white on black stays");
+    assert_eq!(color_on(teal, Rgb(0xF2, 0xF2, 0xF2)), Some(teal), "dark on light stays");
+}
+
 /// Issue #1775: a picture watermark anchored in a header that starts with a table sits in a cell;
 /// placed on the page (`o:allowincell="f"`, `layoutInCell="0"`), it's centred on the margins
 /// behind the body text on every page, not drawn in the header's cell. One laid out in the cell

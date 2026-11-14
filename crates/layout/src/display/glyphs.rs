@@ -62,10 +62,38 @@ pub fn check_box(frame: Rect, checked: bool, color: Rgb, alpha: f32, out: &mut V
     }
 }
 
+/// The least contrast (WCAG, 1 to 21) a text colour keeps against the fill under it before
+/// [`text_color`] swaps it for black or white. Under it, text is as good as lost.
+const MIN_TEXT_CONTRAST: f32 = 2.0;
+
+fn relative_luminance(c: Rgb) -> f32 {
+    let lin = |v: u8| {
+        let v = f32::from(v) / 255.0;
+        if v <= 0.03928 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+    };
+    0.2126 * lin(c.0) + 0.7152 * lin(c.1) + 0.0722 * lin(c.2)
+}
+
+/// WCAG contrast ratio of two colours.
+fn contrast_ratio(a: Rgb, b: Rgb) -> f32 {
+    let (la, lb) = (relative_luminance(a), relative_luminance(b));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
+/// Black or white, whichever contrasts more with `background`.
+fn readable_on(background: Rgb) -> Rgb {
+    if contrast_ratio(Rgb::WHITE, background) >= contrast_ratio(Rgb::BLACK, background) { Rgb::WHITE } else { Rgb::BLACK }
+}
+
 /// Automatic colour is black, or white on a dark background.
 pub fn text_color(c: &TextColor, background: Option<Rgb>) -> Rgb {
     match c {
-        TextColor::Rgb(r) => *r,
+        // A colour that can hardly be told from the shading or highlight under it (a dark
+        // heading colour on black) is drawn black or white instead, whichever reads better.
+        TextColor::Rgb(r) => match background {
+            Some(b) if contrast_ratio(*r, b) < MIN_TEXT_CONTRAST => readable_on(b),
+            _ => *r,
+        },
         TextColor::Auto => {
             if background.is_some_and(|b| b.luma() < 100.0) {
                 Rgb::WHITE
