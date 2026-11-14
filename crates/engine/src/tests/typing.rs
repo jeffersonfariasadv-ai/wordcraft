@@ -3863,3 +3863,25 @@ fn a_document_without_a_saved_zoom_opens_one_page_wide_at_110_percent() {
     assert!(sess.view.single_column && !sess.view.multi_page && sess.view.fit.is_empty());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_list_label_with_tab_or_a_later_letter_goes_on_as_a_list() {
+    // `a)` and Tab starts the list as a Space does, and Enter goes on with b), c).
+    let s = typed("a)\tTexto\nSegundo\nTerceiro");
+    assert_eq!(paras(&s), vec![para("Texto", Some(0)), para("Segundo", Some(0)), para("Terceiro", Some(0))]);
+    assert_eq!(label_at(&s, 0), "%1)");
+    let num = |s: &Session, i: usize| s.doc.para_at(&Pos::body(i, 0)).and_then(|p| p.props.numbering).map(|n| n.num);
+    assert_eq!(num(&s, 0), num(&s, 2));
+    // `1)` and Tab too.
+    let s = typed("1)\tUm\nDois");
+    assert_eq!(paras(&s), vec![para("Um", Some(0)), para("Dois", Some(0))]);
+    // A `b)` typed in the paragraph under an `a)` item joins that list.
+    let mut s = typed("a) Um\n");
+    run(&mut s, "para.numbering", json!({"value": false}));
+    typ(&mut s, "b) Dois");
+    assert_eq!(paras(&s), vec![para("Um", Some(0)), para("Dois", Some(0))]);
+    assert_eq!(num(&s, 0), num(&s, 1));
+    // A `b)` with no list above it stays text.
+    let s = typed("b) Texto");
+    assert_eq!(paras(&s), vec![("b) Texto".to_string(), None, false)]);
+}

@@ -63,6 +63,7 @@ Bullets and Numbering decide whether to toggle off from the selected paragraphs'
 | Shift+Enter in an item | line break inside the same item | `shift_enter_stays_inside_the_list_item` |
 | Paste: Keep Text Only `A`, empty line, `B` into an empty item | three paragraphs `A`, empty, `B`: pasted paragraph breaks are text, not Enter (they never end the list) | `plain_text_paste_keeps_an_empty_paragraph_in_a_list` |
 | `* ` `- ` `1. ` `1) ` `a. ` `a) ` `A. ` `i. ` `I. ` + text | bullet, dash bullet, 1. 1) a. a) A. i. I. lists | `list_autoformat_triggers` |
+| Fork: `a)` / `1)` / `1.` then Tab (not bullets) starts the list as Space does; `b)`, `c)`, `2)` typed in the paragraph under a list item of that kind (letters or numbers, same closing mark) join that list; with no such list above they stay text | list item continuing the list | `a_list_label_with_tab_or_a_later_letter_goes_on_as_a_list` |
 | `- ` typed at the start of an already-written paragraph (checked in Word for Windows, 2026-10-21) | still becomes a list item; the rest of the paragraph's text is kept after it, not only when the trigger is the whole paragraph | `list_autoformat_triggers_in_front_of_existing_text` |
 | `> ` `-> ` `=> ` + text | bulleted list with an arrow bullet (➢ ➔ ⇨; Word takes them from a symbol font, we use the Unicode arrows) ¹ | `arrow_bullets` |
 | `1. ` after other text | a new list restarting at 1 (never continues an earlier list) | `typing_1_dot_starts_numbering_again` |

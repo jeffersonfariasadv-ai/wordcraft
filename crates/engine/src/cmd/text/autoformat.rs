@@ -86,7 +86,7 @@ pub(super) fn insert(s: &mut Session, v: &Value) -> CmdResult {
     let f = s.sel.focus.clone();
     let typed = s.doc.para_at(&f).cloned().map(|p| (p, s.sel.clone()));
     // A list label ("a. ") becomes a list before AutoCorrect could capitalise it.
-    let listed = text == " " && s.prefs.autocorrect.enabled && list_autoformat(s)?;
+    let listed = text == " " && s.prefs.autocorrect.enabled && list_autoformat(s, false)?;
     if !listed {
         crate::cmd::tools::autocorrect(s).inspect_err(|_| s.autocap = None)?;
     }
@@ -130,7 +130,7 @@ pub(super) fn insert(s: &mut Session, v: &Value) -> CmdResult {
 /// "* " / "- " / "> " → bullets, "1. " / "a) " → numbering, typed at the start of a paragraph
 /// (Word triggers on the paragraph's first characters, whatever text already follows the caret,
 /// not only when the trigger is the paragraph's entire content — #3352).
-fn list_autoformat(s: &mut Session) -> Result<bool, CmdError> {
+pub(super) fn list_autoformat(s: &mut Session, by_tab: bool) -> Result<bool, CmdError> {
     let f = s.sel.focus.clone();
     let Some(para) = s.doc.para_at(&f) else { return Ok(false) };
     // A style-linked list (a heading-linked Multilevel List preset, #1793) numbers the paragraph
@@ -139,7 +139,30 @@ fn list_autoformat(s: &mut Session) -> Result<bool, CmdError> {
     if s.doc.styles.resolve_para(&para.props).numbering.is_some_and(|n| n.num != 0) {
         return Ok(false);
     }
-    let Some(prefix) = para.text.get(..f.off) else { return Ok(false) };
+    let Some(typed_prefix) = para.text.get(..f.off) else { return Ok(false) };
+    // A Tab after the label (`a)` Tab) triggers as the Space does, as in Word; the label then
+    // has no space after it yet.
+    let spaced;
+    let prefix = if by_tab {
+        spaced = format!("{typed_prefix} ");
+        spaced.as_str()
+    } else {
+        typed_prefix
+    };
+    if !s.prefs.autocorrect.numbering {
+        return Ok(false);
+    }
+    // `b) ` or `2) ` right under a list item of that kind goes on with that list.
+    if let Some(num) = continued_list(s, &f, prefix) {
+        let para = s.doc.para_mut(f.story, &f.path)?;
+        para.delete(0, f.off)?;
+        para.props.numbering = Some(NumRef { num, level: 0 });
+        if para.props.style.as_deref().is_none_or(|st| st == "Normal") {
+            para.props.style = Some("ListParagraph".into());
+        }
+        s.sel = Selection::caret(Pos { off: 0, ..f });
+        return Ok(true);
+    }
     let kind = match prefix {
         "* " => ListKind::Bullet,
         "- " => ListKind::BulletChar('-'),
@@ -157,7 +180,7 @@ fn list_autoformat(s: &mut Session) -> Result<bool, CmdError> {
         _ => return Ok(false),
     };
     let ac = &s.prefs.autocorrect;
-    if !(if kind.is_bullet() { ac.bullets } else { ac.numbering }) {
+    if !(if kind.is_bullet() { ac.bullets } else { ac.numbering }) || (by_tab && kind.is_bullet()) {
         return Ok(false);
     }
     // Bullets join an existing bullet list; typing "1. " always starts numbering again at 1,
@@ -176,6 +199,30 @@ fn list_autoformat(s: &mut Session) -> Result<bool, CmdError> {
     }
     s.sel = Selection::caret(Pos { off: 0, ..f });
     Ok(true)
+}
+
+/// The list a label like `b) ` or `2) ` goes on with: the one the paragraph just before it is
+/// in, when its label is of the same kind (letters for a letter, numbers for a number, the same
+/// closing mark). `None` for the labels that start a list (`a) `, `1) `) and for anything else.
+fn continued_list(s: &Session, at: &Pos, prefix: &str) -> Option<u32> {
+    use wordcraft_doc::section::NumFormat;
+    let label = prefix.strip_suffix(' ')?;
+    let (body, close) = (label.get(..label.len().checked_sub(1)?)?, label.chars().next_back()?);
+    if !matches!(close, ')' | '.') || body.is_empty() || matches!(body, "a" | "1") {
+        return None;
+    }
+    let letter = body.len() == 1 && body.chars().all(|c| c.is_ascii_lowercase());
+    let number = body.len() <= 3 && body.chars().all(|c| c.is_ascii_digit());
+    if !(letter || number) {
+        return None;
+    }
+    let paths = s.doc.para_paths(at.story);
+    let i = paths.iter().position(|p| *p == at.path)?;
+    let prev = s.doc.para(at.story, paths.get(i.checked_sub(1)?)?)?;
+    let n = prev.props.numbering.filter(|n| n.num != 0)?;
+    let lvl = s.doc.numbering.level(n.num, n.level)?;
+    let format_ok = if letter { lvl.format == NumFormat::LowerLetter } else { lvl.format == NumFormat::Decimal };
+    (n.level == 0 && format_ok && lvl.text.ends_with(close)).then_some(n.num)
 }
 
 /// "word" + two spaces → "word. ": the second Space turns the first into a period, after a

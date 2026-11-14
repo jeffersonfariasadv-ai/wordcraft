@@ -209,6 +209,10 @@ pub(super) fn tab(s: &mut Session, _: &Value) -> CmdResult {
         para.touch();
         return sel_result(s);
     }
+    // `a)` or `1.` and then Tab starts a list, as a Space does.
+    if s.sel.is_collapsed() && s.prefs.autocorrect.enabled && super::autoformat::list_autoformat(s, true)? {
+        return sel_result(s);
+    }
     if s.sel.is_collapsed() && tab_indent_on(s) && tab_indents(s, &f) {
         return indent_by_tab(s, &f);
     }
