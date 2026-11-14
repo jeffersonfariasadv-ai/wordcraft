@@ -32,6 +32,7 @@ pub mod backstage;
 pub mod canvas;
 pub mod caret_glide;
 pub mod chrome;
+pub mod claude_chat;
 pub mod colors;
 pub mod content_controls;
 pub mod control;
@@ -651,6 +652,11 @@ pub struct WordApp {
     /// Language pack installs, the missing-pack bar ([`language_packs`]).
     pub(crate) packs_rt: language_packs::Runtime,
     control_rx: Option<std::sync::mpsc::Receiver<ControlRequest>>,
+    /// The loopback port of the control channel, once it is running (given with `--control`, or
+    /// started by the Claude window).
+    pub(crate) control_port: Option<u16>,
+    /// The Claude chat window.
+    pub(crate) claude: claude_chat::Chat,
     /// Admitted `ui.screenshot` requests: count/byte budgets, retries and completion slots.
     shots: control::Shots,
     /// Monotonic geometry epoch; any size/DPI/zoom/surface/document change increments it,

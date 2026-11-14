@@ -129,6 +129,7 @@ impl eframe::App for App {
         if let Some(key_file) = &self.2 {
             key_file.remove();
         }
+        remove_claude_key_file();
     }
 }
 
@@ -188,6 +189,7 @@ fn schedule_macos_terminate(app: &mut WordApp, key_file: Option<&control_server:
     if let Some(key_file) = key_file {
         key_file.remove();
     }
+    remove_claude_key_file();
     dispatch2::DispatchQueue::main().exec_async(|| {
         if let Some(mtm) = objc2::MainThreadMarker::new() {
             objc2_app_kit::NSApplication::sharedApplication(mtm).terminate(None);
@@ -332,6 +334,30 @@ fn write_prefs(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
 /// through the system spooler (`print`), the system clipboard's text, formatted copies,
 /// pictures and format names (`clipboard`, #45, #584, #687, #833), the system's animation setting
 /// (`animations`), and making WordCraft the default app for Word documents (`default_apps`, #295).
+/// The key file of a control channel the Claude window started, removed when the program ends.
+static CLAUDE_KEY_FILE: std::sync::Mutex<Option<control_server::KeyFile>> = std::sync::Mutex::new(None);
+
+fn remove_claude_key_file() {
+    if let Ok(mut f) = CLAUDE_KEY_FILE.lock()
+        && let Some(file) = f.take()
+    {
+        file.remove();
+    }
+}
+
+/// Starts the control channel on a free port the first time the Claude window needs it, so a
+/// window that never opens Claude has no open port.
+fn claude_bridge() -> Box<dyn Fn(&egui::Context) -> Result<wordcraft_ui_egui::claude_chat::Bridge, String>> {
+    Box::new(|ctx| {
+        let (rx, file, port) = control_server::start(0, ctx.clone(), wordcraft_control_key::settings_dir().as_deref())
+            .ok_or_else(|| "the control channel could not be started".to_string())?;
+        if let Ok(mut slot) = CLAUDE_KEY_FILE.lock() {
+            *slot = file;
+        }
+        Ok((rx, port))
+    })
+}
+
 fn services(file_dialog: file_dialogs::Hook, ctx: &egui::Context) -> Services {
     Services {
         file_dialog: Some(file_dialog),
@@ -339,6 +365,7 @@ fn services(file_dialog: file_dialogs::Hook, ctx: &egui::Context) -> Services {
         print_native: Some(print::submit()),
         cancel_print: Some(print::cancel()),
         clipboard_picture: Some(Box::new(clipboard::picture)),
+        claude_bridge: Some(claude_bridge()),
         make_default_app: default_apps::hook(),
         // Personal templates live in `Templates` in the settings folder (#2852), made on first save.
         templates_dir: wordcraft_control_key::settings_dir().map(|d| d.join("Templates")),
@@ -596,9 +623,9 @@ fn main() -> eframe::Result {
             }
             let mut key_file = None;
             if let Some(port) = control_port
-                && let Some((rx, file)) = control_server::start(port, cc.egui_ctx.clone(), wordcraft_control_key::settings_dir().as_deref())
+                && let Some((rx, file, bound)) = control_server::start(port, cc.egui_ctx.clone(), wordcraft_control_key::settings_dir().as_deref())
             {
-                app = app.with_control(rx);
+                app = app.with_control(rx).with_control_port(bound);
                 key_file = file;
             }
             // Nothing to open (no files, no sample, no control channel driving the editor): start

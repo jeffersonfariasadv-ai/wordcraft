@@ -1,7 +1,7 @@
 use super::{
-    DefaultApp, MAX_RECENT, SaveChoice, SaveInFlight, Value, WordApp, applied_font, async_saves, chrome, colors, crop, dialogs, dialogs_table_style,
-    file_dialogs, i18n, json, keeps_everything, keytips, now_ms, options, panes, paste_picture, printing, push_recent_font, system_clipboard,
-    table_pen, theme, widgets, zotero,
+    DefaultApp, MAX_RECENT, SaveChoice, SaveInFlight, Value, WordApp, applied_font, async_saves, chrome, claude_chat, colors, crop, dialogs,
+    dialogs_table_style, file_dialogs, i18n, json, keeps_everything, keytips, now_ms, options, panes, paste_picture, printing, push_recent_font,
+    system_clipboard, table_pen, theme, widgets, zotero,
 };
 
 impl WordApp {
@@ -777,6 +777,7 @@ impl WordApp {
                         .into(),
                 ));
             }
+            "ui.claude" => json!({"open": claude_chat::toggle(self, p.get("value").and_then(Value::as_bool))}),
             "ui.discord" => {
                 self.canvas.open_url = Some("https://discord.gg/artcraft".into());
                 json!({})
@@ -1079,6 +1080,7 @@ pub(crate) fn works_without_document(id: &str) -> bool {
             | "ui.fileBrowser"
             | "ui.makeDefaultApp"
             | "ui.discord"
+            | "ui.claude"
             | "ui.caretAnimation"
             | "ui.startScreen"
             | "ui.displayServer"

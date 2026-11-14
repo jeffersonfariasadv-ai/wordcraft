@@ -4,6 +4,9 @@ use super::{FileDialogAnswer, FileDialogRequest, async_saves, paste_picture, pri
 /// Platform services injected by the host (file dialogs, file I/O).
 #[derive(Default)]
 pub struct Services {
+    /// Desktop: start the control channel when the Claude window first needs it; returns the
+    /// requests it receives and its loopback port ([`crate::claude_chat`]).
+    pub claude_bridge: Option<Box<dyn Fn(&egui::Context) -> Result<crate::claude_chat::Bridge, String>>>,
     /// Desktop: discover configured printers on a worker.
     pub printers: Option<printing::Discover>,
     /// Desktop: submit the PDF with the chosen settings on a worker.

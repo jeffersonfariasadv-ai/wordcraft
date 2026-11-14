@@ -36,7 +36,7 @@ impl KeyFile {
 /// Bind `127.0.0.1:port`, write the key file into `settings` and serve. `None` when the port
 /// cannot be bound or there is no random key (the control channel is off); the key file is
 /// `None` when it could not be written (requests are then refused).
-pub fn start(port: u16, ctx: egui::Context, settings: Option<&Path>) -> Option<(Receiver<ControlRequest>, Option<KeyFile>)> {
+pub fn start(port: u16, ctx: egui::Context, settings: Option<&Path>) -> Option<(Receiver<ControlRequest>, Option<KeyFile>, u16)> {
     let listener = match TcpListener::bind(("127.0.0.1", port)) {
         Ok(l) => l,
         Err(e) => {
@@ -44,6 +44,8 @@ pub fn start(port: u16, ctx: egui::Context, settings: Option<&Path>) -> Option<(
             return None;
         }
     };
+    // Port 0 asks the system for a free one; the key file is named after the one it gave.
+    let port = listener.local_addr().map_or(port, |a| a.port());
     let key = match random_key() {
         Ok(k) => k,
         Err(e) => {
@@ -71,7 +73,7 @@ pub fn start(port: u16, ctx: egui::Context, settings: Option<&Path>) -> Option<(
         Some(f) => log::info!("control server listening on 127.0.0.1:{port}, key in {}", f.path().display()),
         None => log::info!("control server listening on 127.0.0.1:{port}"),
     }
-    Some((serve_on(listener, ctx, key, FIRST_REQUEST), key_file))
+    Some((serve_on(listener, ctx, key, FIRST_REQUEST), key_file, port))
 }
 
 /// A new key: 32 random bytes from the operating system, as hex.
@@ -493,7 +495,7 @@ mod tests {
             }
             free_port = free_port.wrapping_add(1).max(1024);
         }
-        let ((rx, key_file), port) = started.unwrap();
+        let ((rx, key_file, _), port) = started.unwrap();
         let key_file = key_file.unwrap();
         assert_eq!(key_file.path(), wordcraft_control_key::key_path(&dir, port));
         let key = std::fs::read_to_string(key_file.path()).unwrap();

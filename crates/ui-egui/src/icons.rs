@@ -1034,6 +1034,12 @@ fn paint_view_and_tables(pen: &Pen, name: &str) -> bool {
             pen.line(&[(12.5, 15.5), (17.0, 15.5)]);
         }
         "draft" => pen.lines(3.0, 17.0, &[4.0, 7.0, 10.0, 13.0, 16.0]),
+        // A speech bubble with a four-point spark: the Claude chat.
+        "claude" => {
+            pen.closed(&[(2.5, 3.5), (17.5, 3.5), (17.5, 13.5), (9.0, 13.5), (5.0, 17.0), (5.0, 13.5), (2.5, 13.5)], c);
+            pen.line_c(&[(10.0, 5.5), (10.0, 11.5)], a);
+            pen.line_c(&[(7.0, 8.5), (13.0, 8.5)], a);
+        }
         "focus" => {
             pen.line(&[(3.0, 7.0), (3.0, 3.0), (7.0, 3.0)]);
             pen.line(&[(13.0, 3.0), (17.0, 3.0), (17.0, 7.0)]);

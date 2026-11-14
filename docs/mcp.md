@@ -11,6 +11,17 @@ wordcraft-cli mcp --connect 127.0.0.1:7981 # …including clicks, keys and scree
 
 Claude Code: `claude mcp add wordcraft -- wordcraft-cli mcp`.
 
+## Claude inside the app
+
+The **Claude** button in the title bar opens a chat window: type what to do with the open
+document and Claude does it, through the same commands as the keyboard (so Undo works). It runs
+the person's own Claude Code (`claude -p`, signed in with their Claude account; no API key is
+stored by WordCraft), found through `WORDCRAFT_CLAUDE`, the PATH, `~/.local/bin` or the Claude
+desktop app's copy. The first message starts the control channel on a free loopback port (nothing
+listens before that) and gives Claude `wordcraft-cli mcp --connect` for it; the key file is
+removed on exit. The command `ui.claude` (`{"value"?: bool}`) shows or hides the window. Desktop
+only.
+
 With `--connect`, the bridge sends the app's control key, which it reads from
 `WORDCRAFT_CONTROL_KEY` or from the key file the app writes at start. It sends the key only to
 loopback addresses; see [Keys](control-protocol.md#keys). The bridge serves even when the app

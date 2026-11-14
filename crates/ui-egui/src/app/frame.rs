@@ -1,8 +1,8 @@
 #[cfg(not(target_arch = "wasm32"))]
 use super::file_browser;
 use super::{
-    WordApp, backstage, canvas, chrome, colors, content_controls, dialogs, documents, keys, now_ms, panes, read_aloud, ribbon, theme, updates_ui,
-    zotero,
+    WordApp, backstage, canvas, chrome, claude_chat, colors, content_controls, dialogs, documents, keys, now_ms, panes, read_aloud, ribbon, theme,
+    updates_ui, zotero,
 };
 
 impl WordApp {
@@ -74,6 +74,7 @@ impl WordApp {
                 crate::language_packs::bar(self, ui);
                 chrome::status_bar(self, ui);
                 panes::show(self, ui);
+                claude_chat::dock(self, ui, t);
             }
             if moved(self) {
                 return;
@@ -102,6 +103,7 @@ impl WordApp {
         #[cfg(not(target_arch = "wasm32"))]
         file_browser::show(self, ctx);
         colors::show(self, ctx);
+        claude_chat::poll(self, ctx);
         zotero::show_alert(self, ctx);
         read_aloud::show(self, ctx);
         crate::keytips::show(self, ctx, ui);

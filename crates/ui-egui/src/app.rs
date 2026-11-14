@@ -5,9 +5,9 @@ use super::services::Services;
 use super::state::{AutoSaveBlock, DefaultApp, PromptSave, SaveChoice, keeps_everything};
 use super::{
     AwaitingSave, ControlRequest, DEFAULT_TAB, MAX_DICTIONARY, MAX_RECENT, QUIT, SaveInFlight, Session, UiState, Value, WordApp, applied_font,
-    async_saves, backstage, canvas, chrome, colors, content_controls, crop, desktop_theme, dialogs, dialogs_table_style, documents, file_dialogs,
-    i18n, json, keys, keytips, options, panes, paste_picture, printing, push_recent_font, read_aloud, recent_fonts_from, ribbon, scroll,
-    system_clipboard, table_pen, theme, updates_ui, widgets, window_ui, windows, zotero,
+    async_saves, backstage, canvas, chrome, claude_chat, colors, content_controls, crop, desktop_theme, dialogs, dialogs_table_style, documents,
+    file_dialogs, i18n, json, keys, keytips, options, panes, paste_picture, printing, push_recent_font, read_aloud, recent_fonts_from, ribbon,
+    scroll, system_clipboard, table_pen, theme, updates_ui, widgets, window_ui, windows, zotero,
 };
 
 mod commands;
@@ -105,6 +105,8 @@ impl WordApp {
             updates_rt: updates_ui::Runtime::default(),
             packs_rt: Default::default(),
             control_rx: None,
+            control_port: None,
+            claude: claude_chat::Chat::default(),
             shots: crate::control::Shots::default(),
             capture_epoch: 0,
             surface_geometry: None,
@@ -190,6 +192,13 @@ impl WordApp {
 
     pub fn with_control(mut self, rx: std::sync::mpsc::Receiver<ControlRequest>) -> Self {
         self.control_rx = Some(rx);
+        self
+    }
+
+    /// The port the control channel given to [`WordApp::with_control`] listens on, so the Claude
+    /// window can point Claude at it.
+    pub fn with_control_port(mut self, port: u16) -> Self {
+        self.control_port = Some(port);
         self
     }
 

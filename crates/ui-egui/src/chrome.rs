@@ -390,6 +390,32 @@ pub fn title_bar(app: &mut WordApp, ui: &mut Ui) {
                             }
                             ui.add_space(8.0);
                         }
+                        // Claude chat: a window to tell Claude what to do with the document.
+                        {
+                            let on = app.claude.open;
+                            let (r, resp) = ui.allocate_exact_size(vec2(76.0, 22.0), Sense::click());
+                            let fill = if on || resp.hovered() { t.accent_text } else { t.accent };
+                            ui.painter().rect_filled(r, 11.0, fill);
+                            icons::paint(
+                                ui.painter(),
+                                Rect::from_center_size(pos2(crate::rtl::lead_x(rtl, r, 13.0), r.center().y), vec2(14.0, 14.0)),
+                                "claude",
+                                t.on_accent,
+                                t.on_accent,
+                            );
+                            ui.painter().text(
+                                pos2(crate::rtl::lead_x(rtl, r, 24.0), r.center().y),
+                                crate::rtl::lead_center(rtl),
+                                tl!("Claude"),
+                                medium(11.5),
+                                t.on_accent,
+                            );
+                            resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, tl!("Claude")));
+                            if resp.on_hover_text("Conversar com o Claude para editar este documento").clicked() {
+                                let _ = app.run("ui.claude", json!({}));
+                            }
+                            ui.add_space(8.0);
+                        }
                         search_box(app, ui, control_h);
                         right_start = if rtl { ui.min_rect().max.x } else { ui.min_rect().min.x };
                     });
