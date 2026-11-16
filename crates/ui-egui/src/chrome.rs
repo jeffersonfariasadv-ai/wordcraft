@@ -393,22 +393,20 @@ pub fn title_bar(app: &mut WordApp, ui: &mut Ui) {
                         // Claude chat: a window to tell Claude what to do with the document.
                         {
                             let on = app.claude.open;
-                            let (r, resp) = ui.allocate_exact_size(vec2(76.0, 22.0), Sense::click());
-                            let fill = if on || resp.hovered() { t.accent_text } else { t.accent };
-                            ui.painter().rect_filled(r, 11.0, fill);
-                            icons::paint(
-                                ui.painter(),
-                                Rect::from_center_size(pos2(crate::rtl::lead_x(rtl, r, 13.0), r.center().y), vec2(14.0, 14.0)),
-                                "claude",
-                                t.on_accent,
-                                t.on_accent,
-                            );
+                            let (r, resp) = ui.allocate_exact_size(vec2(92.0, 24.0), Sense::click());
+                            let white = egui::Color32::WHITE;
+                            let fill = if on || resp.hovered() { crate::claude_chat::ORANGE_DARK } else { crate::claude_chat::ORANGE };
+                            ui.painter().rect_filled(r, 12.0, fill);
+                            // A fine light edge; brighter while the panel is open.
+                            let edge = egui::Color32::from_white_alpha(if on { 120 } else { 48 });
+                            ui.painter().rect_stroke(r, 12.0, Stroke::new(1.0, edge), egui::StrokeKind::Inside);
+                            crate::claude_chat::paint_spark(ui.painter(), pos2(crate::rtl::lead_x(rtl, r, 15.0), r.center().y), 7.0, white);
                             ui.painter().text(
-                                pos2(crate::rtl::lead_x(rtl, r, 24.0), r.center().y),
+                                pos2(crate::rtl::lead_x(rtl, r, 29.0), r.center().y),
                                 crate::rtl::lead_center(rtl),
                                 tl!("Claude"),
-                                medium(11.5),
-                                t.on_accent,
+                                semibold(12.0),
+                                white,
                             );
                             resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, tl!("Claude")));
                             if resp.on_hover_text("Conversar com o Claude para editar este documento").clicked() {

@@ -11,10 +11,33 @@
 use std::collections::BTreeMap;
 use std::sync::mpsc::Receiver;
 
-use egui::{Align, Context, Key, Rect, RichText, ScrollArea, Sense, Stroke, TextEdit, vec2};
+use egui::{Align, Color32, Context, Key, Pos2, Rect, RichText, ScrollArea, Sense, Stroke, TextEdit, vec2};
 
 use crate::theme::{Tokens, regular, semibold};
-use crate::{ControlRequest, WordApp, icons};
+use crate::{ControlRequest, WordApp};
+
+/// The orange of the Claude panel and its button: white text on it reads clearly (about 4.5:1),
+/// and `ORANGE_DARK` is its pressed and hovered shade.
+pub(crate) const ORANGE: Color32 = Color32::from_rgb(0xC1, 0x5F, 0x3C);
+pub(crate) const ORANGE_DARK: Color32 = Color32::from_rgb(0xA3, 0x4B, 0x2D);
+/// The lighter orange for small marks drawn on the panel's own background.
+pub(crate) const ORANGE_LIGHT: Color32 = Color32::from_rgb(0xD9, 0x77, 0x57);
+
+/// A spark of twelve rays, long and short in turn, drawn with lines: the mark of the Claude button
+/// and panel. It is our own drawing, not a copy of anyone's logo file.
+pub(crate) fn paint_spark(p: &egui::Painter, center: Pos2, radius: f32, color: Color32) {
+    const RAYS: u8 = 12;
+    let width = (radius * 0.24).max(1.2);
+    for k in 0..RAYS {
+        let angle = std::f32::consts::TAU * f32::from(k) / f32::from(RAYS) - std::f32::consts::FRAC_PI_2;
+        let length = radius * if k % 2 == 0 { 1.0 } else { 0.68 };
+        let (sin, cos) = angle.sin_cos();
+        let dir = vec2(cos, sin);
+        let tip = center + dir * length;
+        p.line_segment([center + dir * radius * 0.18, tip], Stroke::new(width, color));
+        p.circle_filled(tip, width / 2.0, color);
+    }
+}
 
 /// What the host hands over to start the control channel on demand: the requests it will receive
 /// and the loopback port it listens on.
@@ -322,9 +345,9 @@ fn bubble(ui: &mut egui::Ui, t: &Tokens, line: &Line) {
     match line {
         Line::You(text) => {
             ui.with_layout(egui::Layout::right_to_left(Align::TOP), |ui| {
-                egui::Frame::NONE.fill(t.accent).corner_radius(12).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
+                egui::Frame::NONE.fill(ORANGE).corner_radius(12).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
                     ui.set_max_width(width * 0.86);
-                    ui.add(egui::Label::new(RichText::new(text).color(t.on_accent).font(regular(13.0))).selectable(true));
+                    ui.add(egui::Label::new(RichText::new(text).color(Color32::WHITE).font(regular(13.0))).selectable(true));
                 });
             });
         }
@@ -345,7 +368,7 @@ fn bubble(ui: &mut egui::Ui, t: &Tokens, line: &Line) {
             ui.horizontal(|ui| {
                 ui.add_space(6.0);
                 let (r, _) = ui.allocate_exact_size(vec2(8.0, 14.0), Sense::hover());
-                ui.painter().circle_filled(r.center(), 2.5, t.accent);
+                ui.painter().circle_filled(r.center(), 2.5, ORANGE_LIGHT);
                 ui.label(RichText::new(tool_label(name)).color(t.text_dim).font(regular(11.5)));
             });
         }
@@ -372,8 +395,8 @@ fn empty_state(ui: &mut egui::Ui, t: &Tokens, act: &mut Act, running: bool) {
     ui.add_space(28.0);
     ui.vertical_centered(|ui| {
         let (r, _) = ui.allocate_exact_size(vec2(44.0, 44.0), Sense::hover());
-        ui.painter().circle_filled(r.center(), 22.0, t.accent);
-        icons::paint(ui.painter(), Rect::from_center_size(r.center(), vec2(24.0, 24.0)), "claude", t.on_accent, t.on_accent);
+        ui.painter().circle_filled(r.center(), 22.0, ORANGE);
+        paint_spark(ui.painter(), r.center(), 13.0, Color32::WHITE);
         ui.add_space(10.0);
         ui.label(RichText::new("Como posso ajudar com este documento?").font(semibold(15.0)).color(t.text));
         ui.add_space(2.0);
@@ -453,7 +476,7 @@ fn composer(ui: &mut egui::Ui, app: &mut WordApp, t: &Tokens, act: &mut Act) {
         // Enter sends; keep it out of the text. Shift+Enter still makes a new line.
         ui.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Key { key: Key::Enter, pressed: true, .. })));
     }
-    let stroke = Stroke::new(1.0, if focused { t.accent } else { t.input_border });
+    let stroke = Stroke::new(1.0, if focused { ORANGE } else { t.input_border });
     egui::Frame::NONE.fill(t.input).stroke(stroke).corner_radius(12).inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| {
         let edit = ui.add(
             TextEdit::multiline(&mut app.claude.input)
@@ -476,16 +499,16 @@ fn composer(ui: &mut egui::Ui, app: &mut WordApp, t: &Tokens, act: &mut Act) {
                 let fill = if !can {
                     t.border
                 } else if resp.hovered() {
-                    t.accent_text
+                    ORANGE_DARK
                 } else {
-                    t.accent
+                    ORANGE
                 };
                 ui.painter().circle_filled(r.center(), 14.0, fill);
                 let c = r.center();
                 if running {
-                    ui.painter().rect_filled(Rect::from_center_size(c, vec2(9.0, 9.0)), 2.0, t.on_accent);
+                    ui.painter().rect_filled(Rect::from_center_size(c, vec2(9.0, 9.0)), 2.0, Color32::WHITE);
                 } else {
-                    let st = Stroke::new(1.6, t.on_accent);
+                    let st = Stroke::new(1.6, Color32::WHITE);
                     ui.painter().line_segment([c + vec2(0.0, 5.0), c + vec2(0.0, -5.0)], st);
                     ui.painter().line_segment([c + vec2(-4.5, -0.5), c + vec2(0.0, -5.0)], st);
                     ui.painter().line_segment([c + vec2(4.5, -0.5), c + vec2(0.0, -5.0)], st);
@@ -530,8 +553,8 @@ pub(crate) fn dock(app: &mut WordApp, ui: &mut egui::Ui, t: Tokens) {
             egui::Frame::NONE.inner_margin(egui::Margin::symmetric(12, 10)).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let (r, _) = ui.allocate_exact_size(vec2(28.0, 28.0), Sense::hover());
-                    ui.painter().circle_filled(r.center(), 14.0, t.accent);
-                    icons::paint(ui.painter(), Rect::from_center_size(r.center(), vec2(16.0, 16.0)), "claude", t.on_accent, t.on_accent);
+                    ui.painter().circle_filled(r.center(), 14.0, ORANGE);
+                    paint_spark(ui.painter(), r.center(), 9.0, Color32::WHITE);
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
                         ui.label(RichText::new("Claude").font(semibold(14.0)).color(t.text));
