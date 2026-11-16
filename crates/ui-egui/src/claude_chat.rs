@@ -340,14 +340,26 @@ fn tool_label(name: &str) -> String {
     }
 }
 
+/// A selectable label that wraps. The bubbles sit in horizontal layouts, where egui does not wrap
+/// text unless told to: a long reply became one line thousands of points wide and pushed the whole
+/// panel off the screen. A word too long for any line (a link, a path) breaks where it must.
+fn wrapped(text: &str, color: Color32, size: f32) -> egui::Label {
+    let mut job = egui::text::LayoutJob::default();
+    job.append(text, 0.0, egui::TextFormat { font_id: regular(size), color, ..Default::default() });
+    job.wrap.break_anywhere = text.split_whitespace().any(|w| w.chars().count() > 28);
+    egui::Label::new(job).wrap_mode(egui::TextWrapMode::Wrap).selectable(true)
+}
+
 fn bubble(ui: &mut egui::Ui, t: &Tokens, line: &Line) {
     let width = ui.available_width();
     match line {
         Line::You(text) => {
             ui.with_layout(egui::Layout::right_to_left(Align::TOP), |ui| {
                 egui::Frame::NONE.fill(ORANGE).corner_radius(12).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
-                    ui.set_max_width(width * 0.86);
-                    ui.add(egui::Label::new(RichText::new(text).color(Color32::WHITE).font(regular(13.0))).selectable(true));
+                    // The frame's own margins are inside this width: leave them out, or a long line
+                    // is wider than the panel and the panel grows to fit it.
+                    ui.set_max_width(((width - 26.0) * 0.86).max(40.0));
+                    ui.add(wrapped(text, Color32::WHITE, 13.0));
                 });
             });
         }
@@ -359,8 +371,8 @@ fn bubble(ui: &mut egui::Ui, t: &Tokens, line: &Line) {
                     .corner_radius(12)
                     .inner_margin(egui::Margin::symmetric(12, 8))
                     .show(ui, |ui| {
-                        ui.set_max_width(width * 0.92);
-                        ui.add(egui::Label::new(RichText::new(plain(text)).color(t.text).font(regular(13.0))).selectable(true));
+                        ui.set_max_width(((width - 28.0) * 0.96).max(40.0));
+                        ui.add(wrapped(&plain(text), t.text, 13.0));
                     });
             });
         }
@@ -379,8 +391,8 @@ fn bubble(ui: &mut egui::Ui, t: &Tokens, line: &Line) {
                 .corner_radius(8)
                 .inner_margin(egui::Margin::symmetric(10, 7))
                 .show(ui, |ui| {
-                    ui.set_max_width(width);
-                    ui.add(egui::Label::new(RichText::new(text).color(t.text).font(regular(12.5))).selectable(true));
+                    ui.set_max_width((width - 24.0).max(40.0));
+                    ui.add(wrapped(text, t.text, 12.5));
                 });
         }
     }
@@ -1022,6 +1034,38 @@ mod tests {
         let line = r#"{"type":"system","subtype":"init","session_id":"s","model":"claude-opus-5-5"}"#;
         let evs = events_of(line);
         assert!(evs.iter().any(|e| matches!(e, Event::Model(m) if m == "claude-opus-5-5")));
+    }
+
+    /// A long reply (or a link too long for a line) pushed the whole panel off the screen: the
+    /// labels in the bubbles did not wrap, so the content was thousands of points wide.
+    #[test]
+    fn a_long_reply_leaves_the_panel_where_it_is() {
+        use egui_kittest::Harness;
+        let panel_open = |lines: Vec<Line>| {
+            let mut app = WordApp::new(wordcraft_engine::Session::new(wordcraft_engine::sample::sample_document()), Default::default());
+            app.claude.open = true;
+            app.claude.lines = lines;
+            let mut h = Harness::builder().with_size(egui::vec2(1440.0, 900.0)).build_ui_state(
+                |ui, app: &mut WordApp| {
+                    let ctx = ui.ctx().clone();
+                    app.logic(&ctx);
+                    app.ui(ui);
+                },
+                app,
+            );
+            for _ in 0..12 {
+                h.step();
+            }
+            // The page's area narrows by the width of the panel when the panel is on the screen.
+            h.state().canvas.canvas_rect.map_or(f32::MAX, |r| r.width())
+        };
+        let words = "A reclamada deve pagar horas extras, adicional noturno e reflexos. ".repeat(40);
+        let short = panel_open(vec![Line::You("oi".into()), Line::Claude("ok".into())]);
+        assert!(short < 1440.0 - 250.0, "the panel takes room beside the page ({short})");
+        for text in [words, format!("https://example.com/{}", "a".repeat(400))] {
+            let width = panel_open(vec![Line::Claude(text.clone()), Line::You(text.clone()), Line::Note(text)]);
+            assert!((width - short).abs() < 1.0, "a long message moved the panel: the page is {width} wide, {short} with a short one");
+        }
     }
 
     #[test]
