@@ -391,6 +391,9 @@ pub struct UiState {
     /// effort (`low` to `max`; empty is the default), kept between runs. See [`claude_chat`].
     pub claude_model: String,
     pub claude_effort: String,
+    /// The model each choice (`opus`, `sonnet`…) last turned out to be, e.g. `claude-opus-5-5`, so
+    /// the list names the version Claude Code really uses ([`claude_chat`] asks it on every run).
+    pub claude_models: std::collections::BTreeMap<String, String>,
     /// Custom keyboard shortcuts (Customize Keyboard, #368); the session owns them while running.
     pub keyboard: wordcraft_engine::KeyMap,
     /// Custom ribbon tabs and groups, hidden tabs and the Quick Access Toolbar (Customize Ribbon,
@@ -496,6 +499,7 @@ impl Default for UiState {
             caret_animation: true,
             claude_model: String::new(),
             claude_effort: String::new(),
+            claude_models: claude_chat::default_models(),
             keyboard: wordcraft_engine::KeyMap::default(),
             ribbon: wordcraft_engine::RibbonLayout::default(),
             caption_labels: Vec::new(),

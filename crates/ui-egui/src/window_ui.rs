@@ -289,6 +289,7 @@ impl WordApp {
             caret_animation: _,
             claude_model: _,
             claude_effort: _,
+            claude_models: _,
             keyboard: _,
             ribbon: _,
             caption_labels: _,

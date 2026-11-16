@@ -8,6 +8,7 @@
 //!
 //! Desktop only: a browser cannot start a process.
 
+use std::collections::BTreeMap;
 use std::sync::mpsc::Receiver;
 
 use egui::{Align, Context, Key, Rect, RichText, ScrollArea, Sense, Stroke, TextEdit, vec2};
@@ -34,6 +35,8 @@ pub(crate) enum Line {
 #[derive(Debug)]
 pub(crate) enum Event {
     Session(String),
+    /// The model Claude Code is using, as it reports it (`claude-opus-5-5`).
+    Model(String),
     Text(String),
     Tool(String),
     Failed(String),
@@ -51,6 +54,12 @@ pub struct Chat {
     pub(crate) session: Option<String>,
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) child: Option<native::Handle>,
+    /// The model the last conversation used, whatever the choice was.
+    pub(crate) last_model: Option<String>,
+    /// The models were asked for this run.
+    probed: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    probe: Option<Receiver<(String, String)>>,
     focus_input: bool,
 }
 
@@ -63,6 +72,8 @@ impl Chat {
     pub(crate) fn apply(&mut self, ev: Event) {
         match ev {
             Event::Session(id) => self.session = Some(id),
+            // Needs the app's settings: handled in `poll`.
+            Event::Model(_) => {}
             Event::Text(t) => {
                 if !t.trim().is_empty() {
                     self.lines.push(Line::Claude(t.trim().to_string()));
@@ -114,6 +125,65 @@ pub(crate) const MODELS: [(&str, &str); 5] = [("", "Padrão"), ("fable", "Fable"
 pub(crate) const EFFORTS: [(&str, &str); 6] =
     [("", "Padrão"), ("low", "Baixo"), ("medium", "Médio"), ("high", "Alto"), ("xhigh", "Muito alto"), ("max", "Máximo")];
 
+/// What the choices were when this was written: the 5.5 family and Fable 5.2. Only a first guess
+/// for the names in the list; every run asks Claude Code which model each choice really is.
+pub(crate) fn default_models() -> BTreeMap<String, String> {
+    [("fable", "claude-fable-5-2"), ("opus", "claude-opus-5-5"), ("sonnet", "claude-sonnet-5-5"), ("haiku", "claude-haiku-5-5")]
+        .into_iter()
+        .map(|(a, m)| (a.to_string(), m.to_string()))
+        .collect()
+}
+
+/// A model id such as `claude-opus-5-5` (or `claude-haiku-4-5-20251001`) as its family and version:
+/// `("Opus", "5.5")`. Anything else, which includes whatever else a program might report, is `None`.
+fn parse_model(id: &str) -> Option<(String, String)> {
+    if id.len() > 48 || !id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') {
+        return None;
+    }
+    let mut parts = id.strip_prefix("claude-")?.split('-');
+    let family = parts.next().filter(|f| !f.is_empty() && f.bytes().all(|b| b.is_ascii_lowercase()))?;
+    let version: Vec<&str> = parts.take_while(|p| !p.is_empty() && p.len() <= 2 && p.bytes().all(|b| b.is_ascii_digit())).collect();
+    let mut letters = family.chars();
+    let name = letters.next().map(|first| first.to_uppercase().collect::<String>() + letters.as_str())?;
+    Some((name, version.join(".")))
+}
+
+/// `Opus 5.5` for `claude-opus-5-5`.
+fn model_label(id: &str) -> Option<String> {
+    let (name, version) = parse_model(id)?;
+    Some(if version.is_empty() { name } else { format!("{name} {version}") })
+}
+
+/// The name of a choice in the list: its model and version as last seen, or just the family.
+fn choice_name(models: &BTreeMap<String, String>, alias: &str, family: &str) -> String {
+    models.get(alias).and_then(|id| model_label(id)).unwrap_or_else(|| family.to_string())
+}
+
+/// A choice turned out to be this model: remember it, so the list names the version in use.
+fn set_resolved(app: &mut WordApp, alias: &str, id: &str) {
+    if MODELS.iter().any(|(a, _)| !a.is_empty() && *a == alias) && parse_model(id).is_some() {
+        app.ui.claude_models.insert(alias.to_string(), id.to_string());
+    }
+}
+
+/// Claude Code says which model answers: remember it for the header, and for its family's choice.
+fn note_model(app: &mut WordApp, id: &str) {
+    let Some((family, _)) = parse_model(id) else { return };
+    app.claude.last_model = Some(id.to_string());
+    set_resolved(app, &family.to_lowercase(), id);
+}
+
+/// What the header says the next message uses.
+fn current_model_label(app: &WordApp) -> String {
+    match known(&MODELS, &app.ui.claude_model) {
+        "" => match app.claude.last_model.as_deref().and_then(model_label) {
+            Some(m) => format!("Padrão ({m})"),
+            None => "Modelo padrão".to_string(),
+        },
+        alias => choice_name(&app.ui.claude_models, alias, alias),
+    }
+}
+
 /// `value` when it is one of `options` (what a saved setting or a command may hold is not
 /// trusted to be), else empty: Claude Code's default.
 fn known(options: &[(&'static str, &'static str)], value: &str) -> &'static str {
@@ -164,6 +234,13 @@ pub(crate) fn toggle(app: &mut WordApp, value: Option<bool>) -> bool {
 /// Take in what the worker has said since the last frame. Runs every frame, shown or not, so a
 /// reply that arrives while the panel is closed is waiting when it opens.
 pub(crate) fn poll(app: &mut WordApp, ctx: &Context) {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(rx) = &app.claude.probe {
+        let found: Vec<(String, String)> = rx.try_iter().collect();
+        for (alias, id) in found {
+            set_resolved(app, &alias, &id);
+        }
+    }
     let Some(rx) = &app.claude.rx else { return };
     let mut events = Vec::new();
     let mut gone = false;
@@ -178,6 +255,9 @@ pub(crate) fn poll(app: &mut WordApp, ctx: &Context) {
         }
     }
     for ev in events {
+        if let Event::Model(id) = &ev {
+            note_model(app, id);
+        }
         app.claude.apply(ev);
     }
     if gone {
@@ -318,13 +398,13 @@ fn empty_state(ui: &mut egui::Ui, t: &Tokens, act: &mut Act, running: bool) {
 }
 
 /// One drop-down of the choices row: a small label and the list.
-fn choice(ui: &mut egui::Ui, t: &Tokens, id: &str, label: &str, tip: &str, current: &mut String, options: &[(&'static str, &'static str)]) {
-    let value = known(options, current);
-    let shown = options.iter().find(|(v, _)| *v == value).map_or("Padrão", |(_, n)| *n);
+fn choice(ui: &mut egui::Ui, t: &Tokens, id: &str, label: &str, tip: &str, current: &mut String, options: &[(&'static str, String)]) {
+    let value = options.iter().find(|(v, _)| *v == current.as_str()).map_or("", |(v, _)| *v);
+    let shown = options.iter().find(|(v, _)| *v == value).map_or("Padrão", |(_, n)| n.as_str());
     ui.label(RichText::new(label).font(regular(11.5)).color(t.text_dim));
-    let r = craft_ui::ComboBox::from_id_salt(id).selected_text(shown).width(92.0).show_ui(ui, |ui| {
+    let r = craft_ui::ComboBox::from_id_salt(id).selected_text(shown).width(112.0).show_ui(ui, |ui| {
         for (v, name) in options {
-            if ui.selectable_label(value == *v, *name).clicked() {
+            if ui.selectable_label(value == *v, name.as_str()).clicked() {
                 *current = (*v).to_string();
             }
         }
@@ -334,9 +414,20 @@ fn choice(ui: &mut egui::Ui, t: &Tokens, id: &str, label: &str, tip: &str, curre
 
 /// The model and the effort Claude uses for the next message.
 fn choices(ui: &mut egui::Ui, app: &mut WordApp, t: &Tokens) {
+    let models: Vec<(&'static str, String)> =
+        MODELS.iter().map(|(v, name)| (*v, if v.is_empty() { name.to_string() } else { choice_name(&app.ui.claude_models, v, name) })).collect();
+    let efforts: Vec<(&'static str, String)> = EFFORTS.iter().map(|(v, name)| (*v, name.to_string())).collect();
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
-        choice(ui, t, "claude-model", "Modelo", "O modelo do Claude que responde nesta conversa.", &mut app.ui.claude_model, &MODELS);
+        choice(
+            ui,
+            t,
+            "claude-model",
+            "Modelo",
+            "O modelo do Claude que responde. A lista mostra sempre a versão mais nova que o Claude Code usa.",
+            &mut app.ui.claude_model,
+            &models,
+        );
         ui.add_space(6.0);
         choice(
             ui,
@@ -345,7 +436,7 @@ fn choices(ui: &mut egui::Ui, app: &mut WordApp, t: &Tokens) {
             "Esforço",
             "Quanto o Claude pensa antes de responder. Mais esforço dá respostas melhores, mais lentas, e gasta mais do seu plano.",
             &mut app.ui.claude_effort,
-            &EFFORTS,
+            &efforts,
         );
     });
     ui.add_space(6.0);
@@ -422,8 +513,13 @@ pub(crate) fn dock(app: &mut WordApp, ui: &mut egui::Ui, t: Tokens) {
     if !app.claude.open {
         return;
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    if !app.claude.probed {
+        app.claude.probed = true;
+        app.claude.probe = Some(native::probe(ui.ctx().clone()));
+    }
     let mut act = Act::default();
-    let title = app.title_stem();
+    let title = format!("{} · {}", current_model_label(app), app.title_stem());
     egui::Panel::right("claude-dock")
         .resizable(true)
         .default_size(360.0)
@@ -659,6 +755,9 @@ pub(crate) mod native {
             out.push(Event::Session(id.to_string()));
         }
         match v.get("type").and_then(Value::as_str) {
+            Some("system") if v.get("subtype").and_then(Value::as_str) == Some("init") => {
+                out.extend(v.get("model").and_then(Value::as_str).map(|m| Event::Model(m.to_string())));
+            }
             Some("assistant") => {
                 let parts = v.pointer("/message/content").and_then(Value::as_array).cloned().unwrap_or_default();
                 for p in parts {
@@ -727,6 +826,54 @@ pub(crate) mod native {
         let worker = child.clone();
         std::thread::spawn(move || run(worker, stdout, stderr, tx, ctx));
         Ok((rx, Handle(child)))
+    }
+
+    /// Ask Claude Code which model each choice is today (`opus` is whatever Opus is newest), so
+    /// the list can name the version. It reports its model as it starts, before any request is made,
+    /// so this costs nothing from the plan. Answers arrive on the returned channel.
+    pub(crate) fn probe(ctx: egui::Context) -> Receiver<(String, String)> {
+        let (tx, rx) = channel();
+        if let Some(claude) = find_claude() {
+            for &(alias, _) in super::MODELS.iter().filter(|(a, _)| !a.is_empty()) {
+                let (tx, claude, ctx) = (tx.clone(), claude.clone(), ctx.clone());
+                std::thread::spawn(move || {
+                    if let Some(id) = resolve(&claude, alias) {
+                        let _ = tx.send((alias.to_string(), id));
+                        ctx.request_repaint();
+                    }
+                });
+            }
+        }
+        rx
+    }
+
+    /// Start Claude Code on `alias`, read the model it announces, and stop it.
+    fn resolve(claude: &Path, alias: &str) -> Option<String> {
+        let mut cmd = Command::new(claude);
+        cmd.current_dir(std::env::temp_dir())
+            .args(["-p", "--output-format", "stream-json", "--verbose", "--no-session-persistence"])
+            .args(["--tools", "", "--disable-slash-commands", "--strict-mcp-config", "--model", alias])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        std::os::windows::process::CommandExt::creation_flags(&mut cmd, 0x0800_0000);
+        let mut child = cmd.spawn().ok()?;
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(b".");
+        }
+        let mut found = None;
+        if let Some(out) = child.stdout.take() {
+            for line in BufReader::new(out).lines().map_while(Result::ok).take(40) {
+                if let Some(Event::Model(m)) = events_of(&line).into_iter().find(|e| matches!(e, Event::Model(_))) {
+                    found = Some(m);
+                    break;
+                }
+            }
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        found
     }
 
     fn run(child: Arc<Mutex<Child>>, stdout: Option<impl Read>, stderr: Option<impl Read + Send + 'static>, tx: Sender<Event>, ctx: egui::Context) {
@@ -809,6 +956,49 @@ mod tests {
         // Back to the default.
         app.run("ui.claude", serde_json::json!({"value": false, "model": "", "effort": ""})).unwrap();
         assert!(option_args(&app.ui.claude_model, &app.ui.claude_effort).is_empty());
+    }
+
+    #[test]
+    fn a_model_id_reads_as_its_family_and_version() {
+        assert_eq!(model_label("claude-opus-5-5").as_deref(), Some("Opus 5.5"));
+        assert_eq!(model_label("claude-fable-5-2").as_deref(), Some("Fable 5.2"));
+        assert_eq!(model_label("claude-haiku-4-5-20251001").as_deref(), Some("Haiku 4.5"));
+        assert_eq!(model_label("claude-sonnet-4").as_deref(), Some("Sonnet 4"));
+        assert_eq!(model_label("claude-opus").as_deref(), Some("Opus"));
+        for junk in ["", "gpt-5", "claude-", "claude-3-5-sonnet", "claude-Opus-5", "claude-opus-5-5; rm", &"claude-opus-5-5".repeat(5)] {
+            assert_eq!(model_label(junk), None, "{junk:?}");
+        }
+    }
+
+    #[test]
+    fn the_list_names_the_version_claude_code_reports() {
+        let mut app = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), Default::default());
+        // First guess: the 5.5 family.
+        assert_eq!(choice_name(&app.ui.claude_models, "opus", "Opus"), "Opus 5.5");
+        assert_eq!(choice_name(&app.ui.claude_models, "fable", "Fable"), "Fable 5.2");
+        // A newer Opus appears: the next probe, or the next conversation, renames the choice.
+        set_resolved(&mut app, "opus", "claude-opus-6");
+        assert_eq!(choice_name(&app.ui.claude_models, "opus", "Opus"), "Opus 6");
+        note_model(&mut app, "claude-sonnet-5-6");
+        assert_eq!(choice_name(&app.ui.claude_models, "sonnet", "Sonnet"), "Sonnet 5.6");
+        assert_eq!(app.claude.last_model.as_deref(), Some("claude-sonnet-5-6"));
+        // What cannot be a model, or is not one of the choices, is ignored.
+        set_resolved(&mut app, "opus", "not a model");
+        set_resolved(&mut app, "--x", "claude-opus-7");
+        assert_eq!(choice_name(&app.ui.claude_models, "opus", "Opus"), "Opus 6");
+        assert!(!app.ui.claude_models.contains_key("--x"));
+        // The header says what the next message uses.
+        app.ui.claude_model = "opus".into();
+        assert_eq!(current_model_label(&app), "Opus 6");
+        app.ui.claude_model = String::new();
+        assert_eq!(current_model_label(&app), "Padrão (Sonnet 5.6)");
+    }
+
+    #[test]
+    fn the_start_of_a_conversation_names_the_model() {
+        let line = r#"{"type":"system","subtype":"init","session_id":"s","model":"claude-opus-5-5"}"#;
+        let evs = events_of(line);
+        assert!(evs.iter().any(|e| matches!(e, Event::Model(m) if m == "claude-opus-5-5")));
     }
 
     #[test]
