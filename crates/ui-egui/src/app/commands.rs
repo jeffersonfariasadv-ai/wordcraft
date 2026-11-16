@@ -777,7 +777,12 @@ impl WordApp {
                         .into(),
                 ));
             }
-            "ui.claude" => json!({"open": claude_chat::toggle(self, p.get("value").and_then(Value::as_bool))}),
+            "ui.claude" => {
+                if let Err(e) = claude_chat::set_options(self, s("model"), s("effort")) {
+                    return Some(Err(e));
+                }
+                json!({"open": claude_chat::toggle(self, p.get("value").and_then(Value::as_bool)), "model": self.ui.claude_model, "effort": self.ui.claude_effort})
+            }
             "ui.discord" => {
                 self.canvas.open_url = Some("https://discord.gg/artcraft".into());
                 json!({})

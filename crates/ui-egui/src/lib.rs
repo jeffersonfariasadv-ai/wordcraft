@@ -387,6 +387,10 @@ pub struct UiState {
     /// fades, as Word's does on Windows (on, the default), or it jumps and blinks on and off
     /// (off).
     pub caret_animation: bool,
+    /// The Claude panel's model (an alias such as `opus`; empty is Claude Code's own default) and
+    /// effort (`low` to `max`; empty is the default), kept between runs. See [`claude_chat`].
+    pub claude_model: String,
+    pub claude_effort: String,
     /// Custom keyboard shortcuts (Customize Keyboard, #368); the session owns them while running.
     pub keyboard: wordcraft_engine::KeyMap,
     /// Custom ribbon tabs and groups, hidden tabs and the Quick Access Toolbar (Customize Ribbon,
@@ -490,6 +494,8 @@ impl Default for UiState {
             dark_page: false,
             check_spelling: true,
             caret_animation: true,
+            claude_model: String::new(),
+            claude_effort: String::new(),
             keyboard: wordcraft_engine::KeyMap::default(),
             ribbon: wordcraft_engine::RibbonLayout::default(),
             caption_labels: Vec::new(),

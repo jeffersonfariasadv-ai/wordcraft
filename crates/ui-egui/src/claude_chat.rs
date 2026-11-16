@@ -106,6 +106,52 @@ impl Chat {
     }
 }
 
+/// The models the panel offers: the value for `claude --model` (an alias for the latest model of
+/// that family; empty leaves it to Claude Code) and its name.
+pub(crate) const MODELS: [(&str, &str); 5] = [("", "Padrão"), ("fable", "Fable"), ("opus", "Opus"), ("sonnet", "Sonnet"), ("haiku", "Haiku")];
+
+/// The efforts: the value for `claude --effort` and its name.
+pub(crate) const EFFORTS: [(&str, &str); 6] =
+    [("", "Padrão"), ("low", "Baixo"), ("medium", "Médio"), ("high", "Alto"), ("xhigh", "Muito alto"), ("max", "Máximo")];
+
+/// `value` when it is one of `options` (what a saved setting or a command may hold is not
+/// trusted to be), else empty: Claude Code's default.
+fn known(options: &[(&'static str, &'static str)], value: &str) -> &'static str {
+    options.iter().find(|(v, _)| *v == value).map_or("", |(v, _)| *v)
+}
+
+/// The command line options that carry the choices to `claude`.
+pub(crate) fn option_args(model: &str, effort: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for (flag, options, value) in [("--model", &MODELS[..], model), ("--effort", &EFFORTS[..], effort)] {
+        let v = known(options, value);
+        if !v.is_empty() {
+            out.push(flag.to_string());
+            out.push(v.to_string());
+        }
+    }
+    out
+}
+
+/// `ui.claude` with `model` and/or `effort`: choose them. A value that is not offered is an error.
+pub(crate) fn set_options(app: &mut WordApp, model: Option<&str>, effort: Option<&str>) -> Result<(), String> {
+    for (value, options, name) in [(model, &MODELS[..], "model"), (effort, &EFFORTS[..], "effort")] {
+        if let Some(v) = value
+            && known(options, v) != v
+        {
+            let all: Vec<&str> = options.iter().map(|(v, _)| *v).collect();
+            return Err(format!("`{name}` must be one of {all:?} (empty is the default)"));
+        }
+    }
+    if let Some(m) = model {
+        app.ui.claude_model = m.to_string();
+    }
+    if let Some(e) = effort {
+        app.ui.claude_effort = e.to_string();
+    }
+    Ok(())
+}
+
 /// `ui.claude`: show the chat window, or hide it when it is showing (`value` true or false says
 /// which).
 pub(crate) fn toggle(app: &mut WordApp, value: Option<bool>) -> bool {
@@ -271,8 +317,43 @@ fn empty_state(ui: &mut egui::Ui, t: &Tokens, act: &mut Act, running: bool) {
     }
 }
 
+/// One drop-down of the choices row: a small label and the list.
+fn choice(ui: &mut egui::Ui, t: &Tokens, id: &str, label: &str, tip: &str, current: &mut String, options: &[(&'static str, &'static str)]) {
+    let value = known(options, current);
+    let shown = options.iter().find(|(v, _)| *v == value).map_or("Padrão", |(_, n)| *n);
+    ui.label(RichText::new(label).font(regular(11.5)).color(t.text_dim));
+    let r = craft_ui::ComboBox::from_id_salt(id).selected_text(shown).width(92.0).show_ui(ui, |ui| {
+        for (v, name) in options {
+            if ui.selectable_label(value == *v, *name).clicked() {
+                *current = (*v).to_string();
+            }
+        }
+    });
+    r.response.on_hover_text(tip);
+}
+
+/// The model and the effort Claude uses for the next message.
+fn choices(ui: &mut egui::Ui, app: &mut WordApp, t: &Tokens) {
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        choice(ui, t, "claude-model", "Modelo", "O modelo do Claude que responde nesta conversa.", &mut app.ui.claude_model, &MODELS);
+        ui.add_space(6.0);
+        choice(
+            ui,
+            t,
+            "claude-effort",
+            "Esforço",
+            "Quanto o Claude pensa antes de responder. Mais esforço dá respostas melhores, mais lentas, e gasta mais do seu plano.",
+            &mut app.ui.claude_effort,
+            &EFFORTS,
+        );
+    });
+    ui.add_space(6.0);
+}
+
 /// The text box with its send (or stop) button.
 fn composer(ui: &mut egui::Ui, app: &mut WordApp, t: &Tokens, act: &mut Act) {
+    choices(ui, app, t);
     let running = app.claude.running();
     let id = egui::Id::unique("claude-input");
     let focused = ui.memory(|m| m.has_focus(id));
@@ -451,7 +532,8 @@ fn start(app: &mut WordApp, ctx: &Context, prompt: String) -> Result<(), String>
             port
         }
     };
-    let (rx, handle) = native::spawn(port, prompt, app.claude.session.clone(), ctx.clone())?;
+    let (rx, handle) =
+        native::spawn(port, prompt, app.claude.session.clone(), option_args(&app.ui.claude_model, &app.ui.claude_effort), ctx.clone())?;
     app.claude.rx = Some(rx);
     app.claude.child = Some(handle);
     Ok(())
@@ -600,7 +682,13 @@ pub(crate) mod native {
     }
 
     /// Start Claude on `prompt`, wired to the control channel on `port`.
-    pub(crate) fn spawn(port: u16, prompt: String, session: Option<String>, ctx: egui::Context) -> Result<(Receiver<Event>, Handle), String> {
+    pub(crate) fn spawn(
+        port: u16,
+        prompt: String,
+        session: Option<String>,
+        options: Vec<String>,
+        ctx: egui::Context,
+    ) -> Result<(Receiver<Event>, Handle), String> {
         let claude = find_claude().ok_or_else(|| {
             "Claude Code não encontrado. Instale-o (claude.com/code) e entre na sua conta, ou defina WORDCRAFT_CLAUDE com o caminho dele.".to_string()
         })?;
@@ -615,9 +703,13 @@ pub(crate) mod native {
             .arg("--mcp-config")
             .arg(&cfg)
             .arg("--strict-mcp-config")
+            // The person's own skills and plugins are not for this panel, and loading them adds
+            // hundreds of thousands of tokens to every conversation (their plan's limit).
+            .arg("--disable-slash-commands")
             .args(["--allowedTools", "mcp__wordcraft"])
             .args(["--tools", ""])
-            .args(["--append-system-prompt", SYSTEM]);
+            .args(["--append-system-prompt", SYSTEM])
+            .args(&options);
         if let Some(id) = session {
             cmd.args(["--resume", &id]);
         }
@@ -693,6 +785,30 @@ mod tests {
         assert!(events_of("not json").is_empty());
         assert!(events_of("{}").is_empty());
         assert!(events_of(r#"{"type":"assistant","message":{"content":7}}"#).is_empty());
+    }
+
+    #[test]
+    fn only_offered_models_and_efforts_reach_the_command_line() {
+        assert!(option_args("", "").is_empty(), "the default adds nothing");
+        assert_eq!(option_args("opus", "high"), ["--model", "opus", "--effort", "high"]);
+        assert_eq!(option_args("sonnet", ""), ["--model", "sonnet"]);
+        // A saved setting or a command can hold anything: nothing unknown is passed on.
+        assert!(option_args("--dangerously-skip-permissions", "x; rm").is_empty());
+        assert_eq!(option_args("OPUS", "max"), ["--effort", "max"], "names are exact");
+    }
+
+    #[test]
+    fn the_command_sets_the_choices_and_refuses_unknown_ones() {
+        let mut app = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), Default::default());
+        let r = app.run("ui.claude", serde_json::json!({"value": false, "model": "haiku", "effort": "low"})).unwrap();
+        assert_eq!((r["model"].as_str(), r["effort"].as_str()), (Some("haiku"), Some("low")));
+        assert_eq!(app.ui.claude_model, "haiku");
+        assert!(app.run("ui.claude", serde_json::json!({"model": "gpt"})).is_err());
+        assert!(app.run("ui.claude", serde_json::json!({"effort": "extreme"})).is_err());
+        assert_eq!(app.ui.claude_model, "haiku", "a refused value changes nothing");
+        // Back to the default.
+        app.run("ui.claude", serde_json::json!({"value": false, "model": "", "effort": ""})).unwrap();
+        assert!(option_args(&app.ui.claude_model, &app.ui.claude_effort).is_empty());
     }
 
     #[test]

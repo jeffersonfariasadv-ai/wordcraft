@@ -287,6 +287,8 @@ impl WordApp {
             dark_page: _,
             check_spelling: _,
             caret_animation: _,
+            claude_model: _,
+            claude_effort: _,
             keyboard: _,
             ribbon: _,
             caption_labels: _,

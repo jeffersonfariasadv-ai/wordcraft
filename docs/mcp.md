@@ -19,7 +19,7 @@ the person's own Claude Code (`claude -p`, signed in with their Claude account; 
 stored by WordCraft), found through `WORDCRAFT_CLAUDE`, the PATH, `~/.local/bin` or the Claude
 desktop app's copy. The first message starts the control channel on a free loopback port (nothing
 listens before that) and gives Claude `wordcraft-cli mcp --connect` for it; the key file is
-removed on exit. The command `ui.claude` (`{"value"?: bool}`) shows or hides the window. Desktop
+removed on exit. Under the text box, **Modelo** (Fable, Opus, Sonnet, Haiku) and **Esforço** (Baixo to Máximo) choose the model and effort of the next message (`claude --model` / `--effort`); the choice is kept between runs and Padrão leaves it to Claude Code. The command `ui.claude` (`{"value"?: bool, "model"?: string, "effort"?: string}`) shows or hides the window and sets them; a value that is not offered is an error. Desktop
 only.
 
 With `--connect`, the bridge sends the app's control key, which it reads from
