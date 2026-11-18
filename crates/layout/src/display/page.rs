@@ -33,8 +33,8 @@ pub fn page_display(doc: &Document, page: &Page, opts: &DisplayOptions) -> Vec<D
     let mut out = Vec::new();
     let (ha, ba) = dimming(opts);
     let authors = Authors::new(doc);
-    stories_display(doc, &[&page.header[..], &page.footer[..]], None, opts, &authors, ha, &mut out);
-    stories_display(doc, &[&page.items[..]], None, opts, &authors, ba, &mut out);
+    stories_display(doc, &[&page.header[..], &page.footer[..]], None, &[], opts, &authors, ha, &mut out);
+    stories_display(doc, &[&page.items[..]], None, &[], opts, &authors, ba, &mut out);
     body_change_bars(doc, page, &page.items, opts, ba, &mut out);
     out
 }
@@ -50,6 +50,9 @@ pub struct ItemDisplay<'a> {
     clips: Clips,
     /// The page's text boxes (see [`text_frames`]): a turned one's lines are drawn turned.
     turned: Vec<(u32, Rect, Spin)>,
+    /// Fork: the fills of the page's header, footer and body, each with its place in its list,
+    /// for the backdrop of automatic text (see [`ItemDisplay::fills_under`]).
+    fills: [Vec<(usize, Rect, Rgb)>; 3],
 }
 
 impl<'a> ItemDisplay<'a> {
@@ -57,7 +60,16 @@ impl<'a> ItemDisplay<'a> {
         let cells: Vec<Placed> =
             page.header.iter().chain(&page.footer).chain(&page.items).filter(|c| matches!(c, Placed::Cell { clip: true, .. })).cloned().collect();
         let turned = [&page.items, &page.header, &page.footer].into_iter().flat_map(|items| text_frames(items)).collect();
-        ItemDisplay { doc, page, authors: Authors::new(doc), clips: clipped_cells(&cells), turned }
+        let fills = [&page.header, &page.footer, &page.items].map(|list| {
+            list.iter()
+                .enumerate()
+                .filter_map(|(i, p)| match p {
+                    Placed::Fill { rect, color } => Some((i, *rect, *color)),
+                    _ => None,
+                })
+                .collect::<Vec<(usize, Rect, Rgb)>>()
+        });
+        ItemDisplay { doc, page, authors: Authors::new(doc), clips: clipped_cells(&cells), turned, fills }
     }
 
     /// The draw items of `it` alone, as [`page_display`] gives them for a page holding just it
@@ -66,7 +78,10 @@ impl<'a> ItemDisplay<'a> {
         let mut out = Vec::new();
         let items = std::slice::from_ref(it);
         let (_, ba) = dimming(opts);
-        stories_display(self.doc, &[items], Some(&self.clips), opts, &self.authors, ba, &mut out);
+        // Fork: the shading drawn before `it` on its page (a black cell under a white heading),
+        // so automatic text on a dark fill comes out white in the PDF as it does on screen.
+        let under = self.fills_under(it);
+        stories_display(self.doc, &[items], Some(&self.clips), &under, opts, &self.authors, ba, &mut out);
         // A line of a turned text box turns with it (as `stories_display` turns them on a page).
         if let Some((_, rect, spin)) = turned_frame(&self.turned, it).and_then(|k| self.turned.get(k)) {
             let mut turned = Vec::new();
@@ -75,6 +90,23 @@ impl<'a> ItemDisplay<'a> {
         }
         body_change_bars(self.doc, self.page, items, opts, ba, &mut out);
         out
+    }
+
+    /// The fills placed before `it` in its own story list (header, footer or body) of the page,
+    /// as [`stories_display`] collects them when it draws the whole page. Empty when `it` isn't
+    /// one of the page's items.
+    fn fills_under(&self, it: &Placed) -> Vec<(Rect, Rgb)> {
+        let lists = [&self.page.header, &self.page.footer, &self.page.items];
+        for (list, fills) in lists.into_iter().zip(&self.fills) {
+            // Where `it` sits in `list`, from its address: no walk of the list for every item.
+            let k = list.as_ptr_range();
+            if !k.contains(&std::ptr::from_ref(it)) {
+                continue;
+            }
+            let at = (std::ptr::from_ref(it) as usize - k.start as usize) / std::mem::size_of::<Placed>().max(1);
+            return fills.iter().take_while(|(i, ..)| *i <= at).map(|(_, r, c)| (*r, *c)).collect();
+        }
+        Vec::new()
     }
 }
 
@@ -85,8 +117,8 @@ pub fn page_layers(doc: &Document, page: &Page, opts: &DisplayOptions) -> [(f32,
     let (ha, ba) = dimming(opts);
     let (mut hf, mut body) = (Vec::new(), Vec::new());
     let authors = Authors::new(doc);
-    stories_display(doc, &[&page.header[..], &page.footer[..]], None, opts, &authors, 1.0, &mut hf);
-    stories_display(doc, &[&page.items[..]], None, opts, &authors, 1.0, &mut body);
+    stories_display(doc, &[&page.header[..], &page.footer[..]], None, &[], opts, &authors, 1.0, &mut hf);
+    stories_display(doc, &[&page.items[..]], None, &[], opts, &authors, 1.0, &mut body);
     body_change_bars(doc, page, &page.items, opts, 1.0, &mut body);
     [(ha, hf), (ba, body)]
 }
@@ -104,11 +136,14 @@ fn body_change_bars(doc: &Document, page: &Page, items: &[Placed], opts: &Displa
 }
 
 /// Draw items for the placed items of `stories`, faded by `a`.
-/// `shared` gives the page's clipped cells when the caller worked them out already.
+/// `shared` gives the page's clipped cells when the caller worked them out already; `under`, the
+/// shading already placed beneath `stories` when they are only part of a page (the PDF export).
+#[allow(clippy::too_many_arguments)]
 fn stories_display(
     doc: &Document,
     stories: &[&[Placed]],
     shared: Option<&Clips>,
+    under: &[(Rect, Rgb)],
     opts: &DisplayOptions,
     authors: &Authors,
     a: f32,
@@ -129,7 +164,7 @@ fn stories_display(
         };
         let mut done: Vec<u32> = Vec::new();
         // The shading placed so far (cells, paragraphs), under the lines that follow it.
-        let mut fills: Vec<(Rect, Rgb)> = Vec::new();
+        let mut fills: Vec<(Rect, Rgb)> = under.to_vec();
         for it in items.iter() {
             if let Placed::Fill { rect, color } = it {
                 fills.push((*rect, *color));

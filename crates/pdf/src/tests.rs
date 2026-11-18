@@ -462,6 +462,30 @@ fn table_style_hidden_heading_text_stays_out_of_bookmarks_and_tags() {
     }
 }
 
+/// Fork: automatic-colour text on a black table cell or black paragraph shading comes out white
+/// in the PDF, as it does on screen (the export draws one item at a time and used to lose the
+/// shading under it, so the heading was drawn black on black and vanished).
+#[test]
+fn automatic_text_on_dark_shading_is_white_in_pdf() {
+    use wordcraft_doc::props::Rgb;
+    let mut d = Document::new();
+    let mut t = Table::new(2, 1, 400.0);
+    t.rows[0].cells[0].props.shading = Some(Rgb::BLACK);
+    t.rows[0].cells[0].blocks = vec![para_block(Paragraph::with_text("VALOR DA CAUSA", CharProps::default()))];
+    t.rows[1].cells[0].blocks = vec![para_block(Paragraph::with_text("R$ 46.000,00", CharProps::default()))];
+    let mut shaded = Paragraph::with_text("REQUERIMENTOS", CharProps::default());
+    shaded.props.shading = Some(Rgb::BLACK);
+    d.body = vec![Arc::new(Block::Table(t)), para_block(shaded)];
+    for tagged in [false, true] {
+        let raw = String::from_utf8_lossy(&export(&d, &PdfOptions { compress: false, tagged, ..Default::default() }).unwrap()).into_owned();
+        // Each text run sets its fill colour just before `BT`.
+        let inks: Vec<&str> = raw.match_indices("rg\nBT").filter_map(|(i, _)| raw[..i].rsplit(" cm ").next()).collect();
+        assert_eq!(inks.len(), 3, "tagged {tagged}: three text runs: {inks:?}");
+        assert_eq!(inks.iter().filter(|c| c.trim() == "1 1 1").count(), 2, "tagged {tagged}: both headings white: {inks:?}");
+        assert_eq!(inks.iter().filter(|c| c.trim() == "0 0 0").count(), 1, "tagged {tagged}: the value stays black: {inks:?}");
+    }
+}
+
 #[test]
 fn text_mapping_handles_ligatures_and_extras() {
     let d = Document::from_text("office affine");
